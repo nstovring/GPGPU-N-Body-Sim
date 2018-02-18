@@ -1,0 +1,190 @@
+﻿//--------------------------------------------------------------------------------------
+// File: ComputeShaderSort11.hlsl
+//
+// This file contains the compute shaders to perform GPU sorting using DirectX 11.
+// 
+// Copyright (c) Microsoft Corporation. All rights reserved.
+//--------------------------------------------------------------------------------------
+
+//--------------------------------------------------------------------------------------
+// Pragmas
+//--------------------------------------------------------------------------------------
+
+#pragma kernel BitonicSort
+#pragma kernel MatrixTranspose
+#pragma kernel RadixSort
+//--------------------------------------------------------------------------------------
+// Constants
+//--------------------------------------------------------------------------------------
+
+#define BITONIC_BLOCK_SIZE 512
+#define TRANSPOSE_BLOCK_SIZE 16
+
+//--------------------------------------------------------------------------------------
+// Constant Buffers
+//--------------------------------------------------------------------------------------
+cbuffer CB
+{
+    uint g_iLevel;
+    uint g_iLevelMask;
+    uint g_iWidth;
+    uint g_iHeight;
+};
+
+struct particle{
+float3 pos;
+float3 dir;
+uint morton;
+int collision;
+};
+//--------------------------------------------------------------------------------------
+// Structured Buffers
+//--------------------------------------------------------------------------------------
+StructuredBuffer<particle> Input : register( t0 );
+RWStructuredBuffer<particle> Data : register( u0 );
+//RWTexture2D<float4> Result : register (u1);
+//--------------------------------------------------------------------------------------
+// Bitonic Sort Compute Shader
+//--------------------------------------------------------------------------------------
+groupshared particle shared_data[BITONIC_BLOCK_SIZE];
+
+[numthreads(BITONIC_BLOCK_SIZE, 1, 1)]
+void BitonicSort( uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID,  uint3 GTid : SV_GroupThreadID,  uint GI : SV_GroupIndex )
+{
+    // Load shared data
+    shared_data[GI] = Data[DTid.x];
+    GroupMemoryBarrierWithGroupSync();
+    
+    // Sort the shared data
+    for (uint j = g_iLevel >> 1 ; j > 0 ; j >>= 1)
+    {
+		bool alpha = (shared_data[GI & ~j].morton <= shared_data[GI | j].morton) ;
+		bool beta = (bool)(g_iLevelMask & DTid.x);
+		bool phi = ((shared_data[GI & ~j].morton <= shared_data[GI | j].morton) == (bool)(g_iLevelMask & DTid.x));
+		particle result = shared_data[GI];
+		
+		GroupMemoryBarrierWithGroupSync();
+		if(phi)
+		result = shared_data[GI ^ j];
+
+		//particle result = phi ? shared_data[GI ^ j] : shared_data[GI];
+		//uint morton1 = shared_data[GI & ~j].morton;
+		//uint morton2 = shared_data[GI | j].morton;
+        //result = ((morton1 <= morton2) == (bool)(g_iLevelMask & DTid.x)) ? shared_data[GI ^ j] : shared_data[GI];
+        GroupMemoryBarrierWithGroupSync();
+        shared_data[GI] = result;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    // Store shared data
+    Data[DTid.x] = shared_data[GI];
+}
+cbuffer cbCS : register(b0)
+{
+	int c_height : packoffset(c0.x);
+	int c_width : packoffset(c0.y);		// size view port
+	
+};
+bool getBit(uint i, uint n) {
+	return ((n >> i) & 1) == 1;
+}
+
+#define THREADX 512
+#define THREADY 1
+#define GROUP_THREADS THREADX * THREADY
+groupshared particle o[GROUP_THREADS];
+groupshared uint e[GROUP_THREADS];
+groupshared uint f[GROUP_THREADS];
+
+groupshared uint d[GROUP_THREADS];
+groupshared uint totalFalses;
+
+
+[numthreads(THREADX, 1, 1)]
+void RadixSort(uint3 Gid  : SV_GroupID,
+	uint3 DTid : SV_DispatchThreadID,
+	uint3 GTid : SV_GroupThreadID,
+	uint  GI : SV_GroupIndex){
+	//uint idx = DTid.x + DTid.y * c_width;
+	o[GI] = Data[ DTid.x];
+	// loop through each bit
+	[unroll(32)]
+	for (int n = 0; n < 32; n++) {
+
+		// e is 1 where the nth bit is 0.
+		e[GI] = getBit(n, o[GI].morton) == 0;
+
+		GroupMemoryBarrierWithGroupSync(); // wait for e to be populated so we can random access it
+
+		if (GI != 0) {
+			f[GI] = e[GI - 1];
+		}
+		else {
+			f[GI] = 0;
+		}
+
+		GroupMemoryBarrierWithGroupSync(); // wait for f to be populated before we loop on it
+	
+		// Scan Operation (AKA Prefix Sum)
+		[unroll(int(log2(GROUP_THREADS)))]
+		for (uint i = 1; i < GROUP_THREADS; i <<= 1) { //for n = 0 .. log2(N), i =  2^n
+			uint temp;
+			if (GI > i) {
+				temp = f[GI] + f[GI-i];
+			}
+			else {
+				temp = f[GI];
+			}
+			GroupMemoryBarrierWithGroupSync();
+			f[GI] = temp;
+			GroupMemoryBarrierWithGroupSync();
+
+		}
+		//o[GI].morton = f[GI];
+		//Data[idx] = o[GI];
+		//return;
+		// Sum up the falses
+		if (GI == 0) {
+			totalFalses = e[GROUP_THREADS - 1] + f[GROUP_THREADS - 1];
+		}
+
+		GroupMemoryBarrierWithGroupSync(); // wait for thread 0 to finish
+
+		// t contains the indexes for the 1 bits
+		//t[GI] = GI - f[GI] + totalFalses;
+
+		// we now construct t on the fly
+
+		// d contains the destination indexes for all the bits
+		d[GI] = e[GI] ? f[GI] : GI - f[GI] + totalFalses;
+
+		// get the variable
+		particle temp = o[GI];
+		//particle temp = Input[DTid.x];
+		//particle temp = 
+		GroupMemoryBarrierWithGroupSync(); // read-before-write
+
+		// rewrite o
+		o[d[GI]] = temp;
+		//Input[d[GI]] = 
+		GroupMemoryBarrierWithGroupSync(); // wait for o to be fully populated
+
+	}
+
+	Data[DTid.x] = o[d[GI]];
+	
+	}
+
+//--------------------------------------------------------------------------------------
+// Matrix Transpose Compute Shader
+//--------------------------------------------------------------------------------------
+groupshared particle transpose_shared_data[TRANSPOSE_BLOCK_SIZE * TRANSPOSE_BLOCK_SIZE];
+
+[numthreads(TRANSPOSE_BLOCK_SIZE, TRANSPOSE_BLOCK_SIZE, 1)]
+void MatrixTranspose( uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex )
+{
+    transpose_shared_data[GI] = Input[DTid.y * g_iWidth + DTid.x];
+    GroupMemoryBarrierWithGroupSync();
+    uint2 XY = DTid.yx - GTid.yx + GTid.xy;
+    Data[XY.y * g_iHeight + XY.x] = transpose_shared_data[GTid.x * TRANSPOSE_BLOCK_SIZE + GTid.y];
+}

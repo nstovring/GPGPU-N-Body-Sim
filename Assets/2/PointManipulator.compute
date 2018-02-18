@@ -1,0 +1,628 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+#pragma kernel CSCreateBVH
+#pragma kernel CSSortMortonIDs
+#pragma kernel CSGenerateBoundingSpheres
+
+struct particle{
+float3 position;
+float3 direction;
+uint mortonId;
+int collision;
+};
+
+
+
+struct internalNode{
+	int objectId;
+	int nodeId;
+	int parentId;
+	int2 intNodes;
+	int2 leaves;
+	float3 sPos;
+	float3 maxPos;
+	float sRadius;
+	int visited;
+};
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+static const float PI = 3.14159265f;
+
+RWStructuredBuffer<particle> inputPoints;
+RWStructuredBuffer<particle> sortedparticles;
+RWStructuredBuffer<internalNode> internalNodes;
+RWStructuredBuffer<internalNode> leafNodes;
+
+RWStructuredBuffer<uint> mortonIds;
+
+float DeltaTime;
+float speed;
+float angularSpeed;
+float gravity;
+float radius;
+float3 gravityVec;
+// Inverse of Part1By1 - "delete" all odd-indexed bits
+uint Compact1By1(uint x)
+{
+  x &= 0x55555555;                  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+  x = (x ^ (x >>  1)) & 0x33333333; // x = --fe --dc --ba --98 --76 --54 --32 --10
+  x = (x ^ (x >>  2)) & 0x0f0f0f0f; // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
+  x = (x ^ (x >>  4)) & 0x00ff00ff; // x = ---- ---- fedc ba98 ---- ---- 7654 3210
+  x = (x ^ (x >>  8)) & 0x0000ffff; // x = ---- ---- ---- ---- fedc ba98 7654 3210
+  return x;
+}
+
+// Inverse of Part1By2 - "delete" all bits not at positions divisible by 3
+uint Compact1By2(uint x)
+{
+  x &= 0x09249249;                  // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
+  x = (x ^ (x >>  2)) & 0x030c30c3; // x = ---- --98 ---- 76-- --54 ---- 32-- --10
+  x = (x ^ (x >>  4)) & 0x0300f00f; // x = ---- --98 ---- ---- 7654 ---- ---- 3210
+  x = (x ^ (x >>  8)) & 0xff0000ff; // x = ---- --98 ---- ---- ---- ---- 7654 3210
+  x = (x ^ (x >> 16)) & 0x000003ff; // x = ---- ---- ---- ---- ---- --98 7654 3210
+  return x;
+}
+
+uint DecodeMorton3X(uint code)
+{
+  return Compact1By2(code >> 0);
+}
+
+uint DecodeMorton3Y(uint code)
+{
+  return Compact1By2(code >> 1);
+}
+
+uint DecodeMorton3Z(uint code)
+{
+  return Compact1By2(code >> 2);
+}
+
+float3 DecodeMortornToVector(uint code){
+
+uint x = DecodeMorton3X(code);
+uint y = DecodeMorton3Y(code);
+uint z = DecodeMorton3Z(code);
+return float3(x,y,z);
+}
+
+// Expands a 10-bit integer into 30 bits
+// by inserting 2 zeros after each bit.
+uint expandBits(uint v)
+{
+    v = (v * 0x00010001u) & 0xFF0000FFu;
+    v = (v * 0x00000101u) & 0x0F00F00Fu;
+    v = (v * 0x00000011u) & 0xC30C30C3u;
+    v = (v * 0x00000005u) & 0x49249249u;
+    return v;
+}
+
+// Calculates a 30-bit Morton code for the
+// given 3D point located within the unit cube [0,1].
+uint morton3D(float x, float y, float z)
+{
+    x = min(max(x * 1024.0f, 0.0f), 1023.0f);
+    y = min(max(y * 1024.0f, 0.0f), 1023.0f);
+    z = min(max(z * 1024.0f, 0.0f), 1023.0f);
+    uint xx = expandBits((uint)x);
+    uint yy = expandBits((uint)y);
+    uint zz = expandBits((uint)z);
+    return xx * 4 + yy * 2 + zz;
+}
+
+bool simpleCollision(float3 Q,float3 QVel, float3 P, float3 PVel, float r, out float3 newVel){
+float PdotQ = dot(QVel,P-Q);
+//N = float3(0,0,0);
+//if(PdotQ <= 0)
+//return QVel;
+
+float dist = distance(Q,P);
+if(dist <= r*2){
+float3 N = normalize(P-Q);
+float3 C = Q + r * N;
+float RdotP = dot(QVel, PVel);
+float3 rVec = (reflect(QVel,N));// -  N * r * (r*2)/dist);//* length(QVel);
+newVel = rVec;
+return true;
+}
+newVel = QVel;
+return false;
+}
+
+
+float sdSphere(float3 p, float s, float3 q, float r)
+{
+    return (distance(p,q) - s - r);// length(p) - s;
+}
+
+bool checkOverlap(float3 p, float s, float3 q, float r){
+	if(sdSphere(p, q, s, r) <= 0)
+		return true;
+	return false;
+}
+
+bool isLeaf(internalNode node){
+	if(node.objectId != -1)
+		return true;
+	return false;
+}
+
+void GetChildren(internalNode node, out internalNode childA, out internalNode childB){
+	int2 leaves = node.leaves;
+	int2 intNodes = node.intNodes;
+
+	if(leaves.x != -1)
+		childA = leafNodes[leaves.x];
+	if(leaves.y != -1)
+		childB = leafNodes[leaves.y];
+	if(intNodes.x != -1)
+		childA = internalNodes[intNodes.x];
+	if(intNodes.y != -1)
+		childB = internalNodes[intNodes.y];
+}
+
+internalNode CalculateBoundingSphere(internalNode node){
+
+	internalNode childA;
+	internalNode childB;
+	GetChildren(node,childA,childB);
+
+	float3 parentPos = (childA.sPos + childB.sPos)/2; 
+	float parentR = (distance(childA.sPos,childB.sPos) * angularSpeed) + (childA.sRadius + childB.sRadius)/2;
+
+	node.sPos = parentPos;
+	node.sRadius = parentR;
+	return node;
+}
+
+void CalculateAABB(internalNode node,out float3 minPoint,out float3 maxPoint){
+
+	internalNode childA;
+	internalNode childB;
+	GetChildren(node,childA,childB);
+	float3 posAA = childA.sPos;
+	float3 posAB = childA.maxPos;
+	float3 posBA = childB.sPos;
+	float3 posBB = childB.maxPos;
+	float xmin = min(min(posBA.x,posBB.x),min(posAA.x,posAB.x));
+	float ymin = min(min(posBA.y,posBB.y),min(posAA.y,posAB.y));
+	float zmin = min(min(posBA.z,posBB.z),min(posAA.z,posAB.z));
+
+	float xmax = max(max(posBA.x,posBB.x),max(posAA.x,posAB.x));
+	float ymax = max(max(posBA.y,posBB.y),max(posAA.y,posAB.y));
+	float zmax = max(max(posBA.z,posBB.z),max(posAA.z,posAB.z));
+
+	minPoint = float3(xmin,ymin,zmin);
+	maxPoint = float3(xmax,ymax,zmax);
+}
+
+bool AABBOverlap(float3 AA, float3 AB, float3 BA, float3 BB){
+	if ( abs(AA.x - BB.x) > (AB.x + BA.x) ) return false;
+    if ( abs(AA.y - BB.y) > (AB.y + BA.y) ) return false;
+    if ( abs(AA.z - BB.z) > (AB.z + BA.z) ) return false;
+ 
+    // We have an overlap
+    return true;
+}
+
+internalNode GetRoot(){
+	return internalNodes[0];
+}
+void TraverseBVHIterative(internalNode leaf, float radius, float3 curVelocity, out int collisionList[32]){
+	internalNode node = GetRoot();
+	int stack[32];
+
+	for(int i = 0; i < 32; i++)
+	stack[i] = -1;
+
+	float3 curPoint = leaf.sPos;
+	float3 tempVelocity = curVelocity;
+
+	bool traversing = true;
+	int traversalCount = 0;
+	int collisionCount = 0;
+	int maxLoop = 0;
+	do{
+		internalNode childA;
+		internalNode childB;
+		GetChildren(node,childA, childB);
+
+		//bool overlapA = checkOverlap(curPoint, childA.sPos, radius, childA.sRadius);
+		//bool overlapB = checkOverlap(curPoint, childB.sPos, radius, childB.sRadius);
+
+		bool overlapA = AABBOverlap(leaf.sPos, leaf.maxPos, childA.sPos, childA.maxPos);
+		bool overlapB = AABBOverlap(leaf.sPos, leaf.maxPos, childB.sPos, childB.maxPos);
+
+
+		if(overlapA && isLeaf(childA) && childA.objectId != leaf.objectId){
+			collisionList[collisionCount] = childA.objectId;
+			collisionCount++;
+		}
+		if(overlapB && isLeaf(childB)  && childB.objectId != leaf.objectId){
+			collisionList[collisionCount] = childB.objectId;
+			collisionCount++;
+		}
+		bool traverseA = (overlapA && !isLeaf(childA));
+        bool traverseB = (overlapB && !isLeaf(childB));
+
+        if (!traverseA && !traverseB){
+			stack[traversalCount] = -1;
+			traversalCount--;
+			traversalCount = traversalCount <= 0 ? 0 : traversalCount;
+			node = internalNodes[stack[traversalCount]];
+		}else{
+			if(traverseA)
+			node = childA;
+			else
+			node = childB;
+		
+			if (traverseA && traverseB){
+			stack[traversalCount] = childB.nodeId;
+			traversalCount++;
+			}
+		}
+		maxLoop++;
+	}while(stack[traversalCount] != -1);//traversing && traversalCount < 64);
+
+}
+
+[numthreads(512,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
+	uint3 GTid : SV_GroupThreadID,
+	uint  GI : SV_GroupIndex)
+{
+
+	uint count, stride;
+	mortonIds.GetDimensions(count, stride);
+	internalNode leaf = leafNodes[id.x];
+	float3 curPoint = inputPoints[leaf.objectId].position;
+	
+	float3 tempVelocity = inputPoints[leaf.objectId].direction;
+	
+	float r = radius * 0.1;
+
+	float c = 0.001;
+	int collision = 0;
+	float3 friction = normalize(tempVelocity) *-1 * c;
+	tempVelocity += friction;
+	tempVelocity += gravityVec * gravity  * DeltaTime;
+
+	int collisionList[32];
+	TraverseBVHIterative(leaf, r, tempVelocity, collisionList);
+	//leafNodes[id.x].potentialCol = collisionList;
+	GroupMemoryBarrierWithGroupSync();
+
+	[unroll(32)]
+	for(int i = 0; i < 32; i++){
+		//if(collisionList[i] != -1){
+			float3 newVel;
+			particle p = inputPoints[collisionList[i]];
+			//bool hit = simpleCollision(curPoint,tempVelocity, p.position, p.direction, r, newVel); // float3 Q,float3 QVel, float3 P, float3 PVel, float r, out float3 newVel
+			bool hit = false;
+			if(distance(p.position,curPoint)< r *2)
+			hit = true;
+			//bool col = checkOverlap(curPoint,radius, p.position, radius);
+			//GroupMemoryBarrierWithGroupSync();
+			if(hit){
+				//inputPoints[collisionList[i]].collision++;
+				collision += collisionList[i];
+				//tempVelocity += normalize(reflect(tempVelocity, p.direction));
+				//tempVelocity *= 0.5;
+				//curPoint +=tempVelocity * DeltaTime * speed;
+			}
+		//}
+	}
+
+	float3 velocity = tempVelocity;
+	curPoint +=velocity * DeltaTime * speed;
+	
+	if(curPoint.x > 1){
+	curPoint.x = 1;
+	velocity.x *=-1;
+	}else if(curPoint.x < 0){
+	curPoint.x = 0;
+	velocity.x *=-1;
+	}
+
+	if(curPoint.y > 1){
+	curPoint.y = 1;
+	velocity.y *=-1;
+	}else if(curPoint.y < 0){
+	curPoint.y = 0;
+	velocity.y *=-1;
+	}
+
+	if(curPoint.z > 1 ){
+	curPoint.z = 1;
+	velocity.z *=-1;
+	}else if(curPoint.z < 0){
+	curPoint.z = 0;
+	velocity.z *=-1;
+	}
+	
+	inputPoints[leaf.objectId].direction = velocity;
+	inputPoints[leaf.objectId].position = curPoint;
+	inputPoints[leaf.objectId].mortonId = morton3D(curPoint.x,curPoint.y,curPoint.z);
+	inputPoints[leaf.objectId].collision = collision;
+}
+
+//LVBH Construction From here on
+//Count leading zeros method
+int clz1( uint x )
+{
+  int n;
+  if (x == 0) return 32;
+
+  for (n = 0; ((x & 0x80000000) == 0); n++, x <<= 1);
+  return n;
+}
+
+int clz3(uint x){
+	if (x == 0){ 
+	return 32;
+	}
+
+    uint n = 0;
+    if ((x & 0xFFFF0000) == 0){ 
+	n = n + 16;  
+	x = x << 16;
+	}
+    if ((x & 0xFF000000) == 0){ 
+	n = n +  8;
+	x = x <<  8;
+	}
+    if ((x & 0xF0000000) == 0) {n = n +  4;  x = x <<  4;}
+    if ((x & 0xC0000000) == 0) {n = n +  2;  x = x <<  2;}
+    if ((x & 0x80000000) == 0) {n = n +  1;}
+    return n;
+}
+//Deeper Hierarchy functions:
+int findSplit(int first, int last)
+{
+  
+    uint firstCode = inputPoints[first].mortonId;
+    uint lastCode = inputPoints[last].mortonId;
+    
+    //When morton codes are identical we want to return the first id
+    //because if we split it in the middle, both will try to orientate
+    //towards the same direction
+    
+    //to split it in the middle would be the best but since it would be harder
+    //for the range detector we do it this way (both ways less instructions needed:
+    //here: (first + last) >> 1 to "first" and
+    //in determine range we can reduce it to seek forward instead of tetermining the
+    //sub direction and stuff...
+    if (firstCode == lastCode)
+        //return (first + last) >> 1;
+      return first;
+	
+    // Calculate the number of highest bits that are the same
+    // for all objects, using the count-leading-zeros intrinsic.
+    int commonPrefix = clz3(firstCode ^ lastCode);
+
+    // Use binary search to find where the next bit differs.
+    // Specifically, we are looking for the highest object that
+    // shares more than commonPrefix bits with the first one.
+
+    int split = first; // initial guess
+    int step = last - first;
+    do
+    {
+        step = (step + 1) >> 1; // exponential decrease
+        int newSplit = split + step; // proposed new position
+
+        if (newSplit < last)
+        {
+            uint splitCode = inputPoints[newSplit].mortonId;
+            int splitPrefix = clz3(firstCode ^ splitCode);
+            if (splitPrefix > commonPrefix)
+                split = newSplit; // accept proposal
+        }
+    }
+    while (step > 1);
+
+    return split;
+}
+int2 determineRange(int index)
+{
+  //so we don't have to call it every time
+  //uint lso, stride;
+  //inputPoints.GetDimensions(lso,stride);
+  uint lso = 512;
+  lso = lso-1;
+  //tadaah, it's the root node
+  if(index == 0)
+    return int2( 0, lso);
+  //direction to walk to, 1 to the right, -1 to the left
+  int dir;
+  //morton code diff on the outer known side of our range ... diff mc3 diff mc4 ->DIFF<- [mc5 diff mc6 diff ... ] diff .. 
+  int d_min;
+  int initialindex = index;
+  
+  uint minone = inputPoints[index-1].mortonId;
+  uint precis = inputPoints[index].mortonId;
+  uint pluone = inputPoints[index+1].mortonId;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if((minone == precis && pluone == precis))
+  {
+    //set the mode to go towards the right, when the left and the right
+    //object are being the same as this one, so groups of equal
+    //code will be processed from the left to the right
+    //and in node order from the top to the bottom, with each node X (ret.x = index)
+    //containing Leaf object X and nodes from X+1 (the split func will make this split there)
+    //till the end of the groups
+    //(if any bit differs... DEP=32) it will stop the search
+    while(index > 0 && index < lso )
+    {
+       //move one step into our direction
+       index += 1;
+       if(index >= lso){
+       //we hit the left end of our list
+	 	break;
+	 	}
+	  
+      if(inputPoints[index].mortonId != inputPoints[index+1].mortonId){
+       //there is a diffrence
+	 	break;
+	 	}
+    }
+    //return the end of equal grouped codes
+    return int2(initialindex,index);
+}else{
+    //Our codes differ, so we seek for the ranges end in the binary search fashion:
+    int2 lr= int2(clz3(precis ^ minone),clz3(precis ^ pluone));
+    //now check wich one is higher (codes put side by side and wrote from up to down)
+      if(lr.x > lr.y)
+      {//to the left, set the search-depth to the right depth
+	dir = -1;
+	d_min = lr.y;
+      }else{//to the right, set the search-depth to the left depth
+	dir = 1;
+	d_min = lr.x;
+      }
+    }
+    //Now look for an range to search in (power of two)
+    int l_max = 2;
+    //so we don't have to calc it 3x
+    int testindex = index + l_max*dir;
+    while((testindex<=lso&&testindex>=0)?(clz3(precis ^ inputPoints[testindex].mortonId)>d_min):(false))
+    {l_max *= 2;testindex = index + l_max*dir;}
+	
+    int l = 0;
+    //go from l_max/2 ... l_max/4 ... l_max/8 .......... 1 all the way down
+    for(int div = 2 ; l_max / div >= 1 ; div *= 2){
+      //calculate the ofset state
+        int t = l_max/div;
+	//calculate where to test next
+        int newTest = index + (l + t)*dir;
+	//test if in code range
+        if (newTest <= lso && newTest >= 0)
+        {
+            int splitPrefix = clz3(precis ^ inputPoints[newTest].mortonId);
+	    //and if the code is higher then our minimum, update the position
+            if (splitPrefix > d_min)
+	    l = l+t;
+        }
+    }
+    //now give back the range (in the right order, [lower|higher])
+    if(dir==1)
+      return int2(index,index + l*dir);
+    else
+      return int2(index + l*dir,index);
+	return int2(0,0);
+}
+[numthreads(512,1,1)]
+void CSCreateBVH (uint3 id : SV_DispatchThreadID)
+{
+
+	leafNodes[id.x].objectId = id.x;
+	leafNodes[id.x].nodeId = id.x;
+	leafNodes[id.x].sPos = inputPoints[id.x].position;
+	leafNodes[id.x].maxPos = inputPoints[id.x].position;
+	leafNodes[id.x].sRadius = radius;// inputPoints[id.x].radius;
+	internalNodes[id.x].objectId = -1;
+	internalNodes[id.x].visited = 0;
+	internalNodes[id.x].nodeId = id.x;
+
+	int2 inrange = determineRange(id.x);
+	int first = inrange.x;
+	int last = inrange.y;
+	
+	int split = findSplit(first,last);
+	
+	int2 leaves;
+	int2 intNodes;
+
+	GroupMemoryBarrierWithGroupSync();
+	if(split == first){
+		leaves.x = split;
+		leafNodes[split].parentId = id.x;
+		intNodes.x = -1;
+		//leafNodes[split].objectId = inputPoints[split].
+	}
+	else{
+		intNodes.x = split;
+		internalNodes[split].parentId = id.x;
+		leaves.x = -1;
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	//internalNode childB;
+	if(split +1 == last){
+		leaves.y =  split +1;
+		leafNodes[split + 1].parentId = id.x;
+		intNodes.y = -1;
+	}
+	else{
+		intNodes.y = split +1;
+		internalNodes[split + 1].parentId = id.x;
+		leaves.y = -1;
+	}
+	GroupMemoryBarrierWithGroupSync();
+	internalNodes[id.x].leaves = leaves;
+	internalNodes[id.x].intNodes = intNodes;
+}
+
+[numthreads(512,1,1)]
+void CSGenerateBoundingSpheres(uint3 id: SV_DISPATCHTHREADID){
+	//internalNodes[id.x]
+	int parentId = leafNodes[id.x].parentId;
+
+	//if(internalNodes[parentId].visited < 1){
+	//	InterlockedAdd(internalNodes[parentId].visited,1);
+	//	return;
+	//}
+	int traversalCount = 0;
+	internalNode parent;
+	do{
+		parent = internalNodes[parentId];
+		float3 min;
+		float3 max;
+		CalculateAABB(parent,min,max);
+		//parent = CalculateBoundingSphere(parent);
+		internalNodes[parentId].sPos = min;
+		internalNodes[parentId].maxPos = max;
+		internalNodes[parentId].sRadius = parent.sRadius;
+		parentId = parent.parentId;
+	}while(parent.nodeId != 0);
+
+	//GroupMemoryBarrierWithGroupSync();
+	//internalNode parent = internalNodes[parentId];
+	//
+	//
+	//parent = internalNodes[parentId];
+	//
+	//parent = CalculateBoundingSphere(parent);
+	//GroupMemoryBarrierWithGroupSync();
+	//
+	//internalNodes[parentId].sPos = parent.sPos;
+	//internalNodes[parentId].sRadius = parent.sRadius;
+	//
+	//int nodeParentId = internalNodes[id.x].parentId;
+	//if(internalNodes[nodeParentId].visited < 1){
+	//InterlockedAdd(internalNodes[nodeParentId].visited,1);
+	//return;
+	//}
+	//
+	//
+	//parent = internalNodes[nodeParentId];
+	//parent = CalculateBoundingSphere(parent);
+	//GroupMemoryBarrierWithGroupSync();
+
+	//internalNodes[nodeParentId].sPos = parent.sPos;
+	//internalNodes[nodeParentId].sRadius = parent.sRadius;
+}
+
+
+
+[numthreads(32,1,1)]
+void CSSortMortonIDs (uint3 id : SV_DispatchThreadID)
+{
+	float3 particlePos =  inputPoints[id.x].position; 
+	uint mortonid = morton3D(particlePos.x,particlePos.y,particlePos.z);
+	mortonIds[id.x] = mortonid;
+	inputPoints[id.x].mortonId = mortonid;
+	GroupMemoryBarrierWithGroupSync();
+}
