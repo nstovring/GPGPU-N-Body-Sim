@@ -7,6 +7,7 @@
 struct particle{
 float3 position;
 float3 direction;
+float radius;
 uint mortonId;
 int collision;
 };
@@ -19,7 +20,7 @@ struct internalNode{
 	int parentId;
 	int2 intNodes;
 	int2 leaves;
-	float3 sPos;
+	float3 minPos;
 	float3 maxPos;
 	float sRadius;
 	int visited;
@@ -110,24 +111,7 @@ uint morton3D(float x, float y, float z)
     return xx * 4 + yy * 2 + zz;
 }
 
-bool simpleCollision(float3 Q,float3 QVel, float3 P, float3 PVel, float r, out float3 newVel){
-float PdotQ = dot(QVel,P-Q);
-//N = float3(0,0,0);
-//if(PdotQ <= 0)
-//return QVel;
 
-float dist = distance(Q,P);
-if(dist <= r*2){
-float3 N = normalize(P-Q);
-float3 C = Q + r * N;
-float RdotP = dot(QVel, PVel);
-float3 rVec = (reflect(QVel,N));// -  N * r * (r*2)/dist);//* length(QVel);
-newVel = rVec;
-return true;
-}
-newVel = QVel;
-return false;
-}
 
 
 float sdSphere(float3 p, float s, float3 q, float r)
@@ -167,10 +151,10 @@ internalNode CalculateBoundingSphere(internalNode node){
 	internalNode childB;
 	GetChildren(node,childA,childB);
 
-	float3 parentPos = (childA.sPos + childB.sPos)/2; 
-	float parentR = (distance(childA.sPos,childB.sPos) * angularSpeed) + (childA.sRadius + childB.sRadius)/2;
+	float3 parentPos = (childA.minPos + childB.minPos)/2; 
+	float parentR = (distance(childA.minPos,childB.minPos) * angularSpeed) + (childA.sRadius + childB.sRadius)/2;
 
-	node.sPos = parentPos;
+	node.minPos = parentPos;
 	node.sRadius = parentR;
 	return node;
 }
@@ -180,9 +164,9 @@ void CalculateAABB(internalNode node,out float3 minPoint,out float3 maxPoint){
 	internalNode childA;
 	internalNode childB;
 	GetChildren(node,childA,childB);
-	float3 posAA = childA.sPos;
+	float3 posAA = childA.minPos;
 	float3 posAB = childA.maxPos;
-	float3 posBA = childB.sPos;
+	float3 posBA = childB.minPos;
 	float3 posBB = childB.maxPos;
 	float xmin = min(min(posBA.x,posBB.x),min(posAA.x,posAB.x));
 	float ymin = min(min(posBA.y,posBB.y),min(posAA.y,posAB.y));
@@ -196,27 +180,22 @@ void CalculateAABB(internalNode node,out float3 minPoint,out float3 maxPoint){
 	maxPoint = float3(xmax,ymax,zmax);
 }
 
-bool AABBOverlap(float3 AA, float3 AB, float3 BA, float3 BB){
-	if ( abs(AA.x - BB.x) > (AB.x + BA.x) ) return false;
-    if ( abs(AA.y - BB.y) > (AB.y + BA.y) ) return false;
-    if ( abs(AA.z - BB.z) > (AB.z + BA.z) ) return false;
- 
-    // We have an overlap
-    return true;
+bool AABBOverlap(float3 minA, float3 maxA, float3 minB, float3 maxB){
+	 return (minA.x <= maxB.x && maxA.x >= minB.x) &&
+         (minA.y <= maxB.y && maxA.y >= minB.y) &&
+         (minA.z <= maxB.z && maxA.z >= minB.z);
 }
 
 internalNode GetRoot(){
 	return internalNodes[0];
 }
-void TraverseBVHIterative(internalNode leaf, float radius, float3 curVelocity, out int collisionList[32]){
+void TraverseBVHIterative(internalNode leaf, float radius, out int collisionList[32]){
 	internalNode node = GetRoot();
 	int stack[32];
 
 	for(int i = 0; i < 32; i++)
 	stack[i] = -1;
 
-	float3 curPoint = leaf.sPos;
-	float3 tempVelocity = curVelocity;
 
 	bool traversing = true;
 	int traversalCount = 0;
@@ -227,11 +206,9 @@ void TraverseBVHIterative(internalNode leaf, float radius, float3 curVelocity, o
 		internalNode childB;
 		GetChildren(node,childA, childB);
 
-		//bool overlapA = checkOverlap(curPoint, childA.sPos, radius, childA.sRadius);
-		//bool overlapB = checkOverlap(curPoint, childB.sPos, radius, childB.sRadius);
-
-		bool overlapA = AABBOverlap(leaf.sPos, leaf.maxPos, childA.sPos, childA.maxPos);
-		bool overlapB = AABBOverlap(leaf.sPos, leaf.maxPos, childB.sPos, childB.maxPos);
+		float3 AABBRadius = float3(radius/2,radius/2,radius/2);
+		bool overlapA = AABBOverlap(leaf.minPos + AABBRadius, leaf.maxPos - AABBRadius, childA.minPos, childA.maxPos);
+		bool overlapB = AABBOverlap(leaf.minPos + AABBRadius, leaf.maxPos - AABBRadius, childB.minPos, childB.maxPos);
 
 
 		if(overlapA && isLeaf(childA) && childA.objectId != leaf.objectId){
@@ -262,88 +239,95 @@ void TraverseBVHIterative(internalNode leaf, float radius, float3 curVelocity, o
 			}
 		}
 		maxLoop++;
-	}while(stack[traversalCount] != -1);//traversing && traversalCount < 64);
+	}while(stack[traversalCount] != -1);//;maxLoop < 32 && collisionCount < 32);//traversing && traversalCount < 64);
 
 }
-
+bool simpleCollision(float3 Q, float3 P, float r){
+float dist = distance(Q,P);
+if(dist < r){
+return true;
+}
+return false;
+}
 [numthreads(512,1,1)]
 void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
 	uint3 GTid : SV_GroupThreadID,
 	uint  GI : SV_GroupIndex)
 {
-
-	uint count, stride;
-	mortonIds.GetDimensions(count, stride);
 	internalNode leaf = leafNodes[id.x];
-	float3 curPoint = inputPoints[leaf.objectId].position;
 	
-	float3 tempVelocity = inputPoints[leaf.objectId].direction;
-	
-	float r = radius * 0.1;
-
-	float c = 0.001;
-	int collision = 0;
-	float3 friction = normalize(tempVelocity) *-1 * c;
-	tempVelocity += friction;
-	tempVelocity += gravityVec * gravity  * DeltaTime;
-
+	inputPoints[leaf.objectId].collision = 0;
 	int collisionList[32];
-	TraverseBVHIterative(leaf, r, tempVelocity, collisionList);
-	//leafNodes[id.x].potentialCol = collisionList;
+	TraverseBVHIterative(leaf, radius, collisionList);
 	GroupMemoryBarrierWithGroupSync();
 
 	[unroll(32)]
 	for(int i = 0; i < 32; i++){
-		//if(collisionList[i] != -1){
-			float3 newVel;
+		if(collisionList[i] != -1){
 			particle p = inputPoints[collisionList[i]];
-			//bool hit = simpleCollision(curPoint,tempVelocity, p.position, p.direction, r, newVel); // float3 Q,float3 QVel, float3 P, float3 PVel, float r, out float3 newVel
-			bool hit = false;
-			if(distance(p.position,curPoint)< r *2)
-			hit = true;
-			//bool col = checkOverlap(curPoint,radius, p.position, radius);
-			//GroupMemoryBarrierWithGroupSync();
+			particle l = inputPoints[leaf.objectId];
+			bool hit = simpleCollision(l.position, p.position, radius); // float3 Q,float3 QVel, float3 P, float3 PVel, float r, out float3 newVel
+			GroupMemoryBarrierWithGroupSync();
+
 			if(hit){
-				//inputPoints[collisionList[i]].collision++;
-				collision += collisionList[i];
-				//tempVelocity += normalize(reflect(tempVelocity, p.direction));
-				//tempVelocity *= 0.5;
+				//collision += collisionList[i];
+				inputPoints[leaf.objectId].collision = 1;
+				inputPoints[collisionList[i]].collision = 1;
+				float dist = distance(p.position, l.position) - radius*2;
+				float3 N = normalize(p.position - l.position);
+				//inputPoints[collisionList[i]].direction =  reflect(p.direction, normalize( curPoint-p.position));
+				float3 reflectionVector = reflect(l.direction, N);
+				inputPoints[leaf.objectId].direction = p.direction;
+				inputPoints[collisionList[i]].direction = l.direction;
+				GroupMemoryBarrierWithGroupSync();
+				//curPoint += N * (radius/dist);
+				//tempVelocity = normalize(reflect(tempVelocity, N));// * ((radius*2)/dist);//N * (radius*2)/(dist);
 				//curPoint +=tempVelocity * DeltaTime * speed;
 			}
-		//}
+		}
 	}
+	GroupMemoryBarrierWithGroupSync();
 
+
+	float3 curPoint = inputPoints[leaf.objectId].position;
+	float3 tempVelocity = inputPoints[leaf.objectId].direction;
+
+	float c = 0.01;
+	float3 friction = normalize(tempVelocity) *-1 * c;
+	tempVelocity += friction * DeltaTime;
+	tempVelocity += gravityVec * gravity  * DeltaTime;
 	float3 velocity = tempVelocity;
 	curPoint +=velocity * DeltaTime * speed;
 	
-	if(curPoint.x > 1){
-	curPoint.x = 1;
+	if(curPoint.x > 1 - radius){
+	curPoint.x =  1 - radius;
 	velocity.x *=-1;
-	}else if(curPoint.x < 0){
-	curPoint.x = 0;
+	}else if(curPoint.x < 0 + radius){
+	curPoint.x = 0 + radius;
 	velocity.x *=-1;
 	}
 
-	if(curPoint.y > 1){
-	curPoint.y = 1;
+	if(curPoint.y > 1 - radius){
+	curPoint.y =  1 - radius;
 	velocity.y *=-1;
-	}else if(curPoint.y < 0){
-	curPoint.y = 0;
+	}else if(curPoint.y < 0 + radius){
+	curPoint.y = 0 + radius;
 	velocity.y *=-1;
 	}
 
-	if(curPoint.z > 1 ){
-	curPoint.z = 1;
+	if(curPoint.z >  1 - radius){
+	curPoint.z =  1 - radius;
 	velocity.z *=-1;
-	}else if(curPoint.z < 0){
-	curPoint.z = 0;
+	}else if(curPoint.z < 0 + radius){
+	curPoint.z = 0 + radius;
 	velocity.z *=-1;
 	}
 	
 	inputPoints[leaf.objectId].direction = velocity;
 	inputPoints[leaf.objectId].position = curPoint;
 	inputPoints[leaf.objectId].mortonId = morton3D(curPoint.x,curPoint.y,curPoint.z);
-	inputPoints[leaf.objectId].collision = collision;
+	
+	inputPoints[leaf.objectId].radius = radius;
 }
 
 //LVBH Construction From here on
@@ -516,12 +500,11 @@ int2 determineRange(int index)
 [numthreads(512,1,1)]
 void CSCreateBVH (uint3 id : SV_DispatchThreadID)
 {
-
 	leafNodes[id.x].objectId = id.x;
 	leafNodes[id.x].nodeId = id.x;
-	leafNodes[id.x].sPos = inputPoints[id.x].position;
-	leafNodes[id.x].maxPos = inputPoints[id.x].position;
-	leafNodes[id.x].sRadius = radius;// inputPoints[id.x].radius;
+	leafNodes[id.x].minPos = inputPoints[id.x].position- float3(radius/2,radius/2,radius/2);
+	leafNodes[id.x].maxPos = inputPoints[id.x].position +  float3(radius/2,radius/2,radius/2);
+	leafNodes[id.x].sRadius = radius;
 	internalNodes[id.x].objectId = -1;
 	internalNodes[id.x].visited = 0;
 	internalNodes[id.x].nodeId = id.x;
@@ -567,7 +550,6 @@ void CSCreateBVH (uint3 id : SV_DispatchThreadID)
 
 [numthreads(512,1,1)]
 void CSGenerateBoundingSpheres(uint3 id: SV_DISPATCHTHREADID){
-	//internalNodes[id.x]
 	int parentId = leafNodes[id.x].parentId;
 
 	//if(internalNodes[parentId].visited < 1){
@@ -582,37 +564,13 @@ void CSGenerateBoundingSpheres(uint3 id: SV_DISPATCHTHREADID){
 		float3 max;
 		CalculateAABB(parent,min,max);
 		//parent = CalculateBoundingSphere(parent);
-		internalNodes[parentId].sPos = min;
+		internalNodes[parentId].minPos = min;
 		internalNodes[parentId].maxPos = max;
 		internalNodes[parentId].sRadius = parent.sRadius;
 		parentId = parent.parentId;
 	}while(parent.nodeId != 0);
 
-	//GroupMemoryBarrierWithGroupSync();
-	//internalNode parent = internalNodes[parentId];
-	//
-	//
-	//parent = internalNodes[parentId];
-	//
-	//parent = CalculateBoundingSphere(parent);
-	//GroupMemoryBarrierWithGroupSync();
-	//
-	//internalNodes[parentId].sPos = parent.sPos;
-	//internalNodes[parentId].sRadius = parent.sRadius;
-	//
-	//int nodeParentId = internalNodes[id.x].parentId;
-	//if(internalNodes[nodeParentId].visited < 1){
-	//InterlockedAdd(internalNodes[nodeParentId].visited,1);
-	//return;
-	//}
-	//
-	//
-	//parent = internalNodes[nodeParentId];
-	//parent = CalculateBoundingSphere(parent);
-	//GroupMemoryBarrierWithGroupSync();
-
-	//internalNodes[nodeParentId].sPos = parent.sPos;
-	//internalNodes[nodeParentId].sRadius = parent.sRadius;
+	
 }
 
 

@@ -32,6 +32,7 @@ public class BufferSorter : MonoBehaviour {
     {
         public Vector3 position;
         public Vector3 direction;
+        float radius;
         public uint morton;
         int collision;
     }
@@ -47,8 +48,6 @@ public class BufferSorter : MonoBehaviour {
         public float sRadius;
         public int visited;
     };
-
- 
    
     int mainKernelHandler;
     int mortonKernelHandler;
@@ -61,8 +60,8 @@ public class BufferSorter : MonoBehaviour {
         //Setup buffers
         leafNodeBuffer = new ComputeBuffer(count, sizeof(int) * 8 + sizeof(float) * 7 , ComputeBufferType.Default);
         internalNodeBuffer = new ComputeBuffer(count -1, sizeof(int) * 8 + sizeof(float) * 7, ComputeBufferType.Default);
-        inputcomputeBuffer = new ComputeBuffer(count, sizeof(float) * 3 * 2 + sizeof(uint) + sizeof(int), ComputeBufferType.Default);
-        sortcomputeBuffer = new ComputeBuffer(count, sizeof(float) * 3 * 2 + sizeof(uint) + sizeof(int), ComputeBufferType.Default);
+        inputcomputeBuffer = new ComputeBuffer(count, (sizeof(float) * 3 * 2) + sizeof(uint) + sizeof(int) + sizeof(float), ComputeBufferType.Default);
+        sortcomputeBuffer = new ComputeBuffer(count,(sizeof(float) * 3 * 2) + sizeof(uint) + sizeof(int) + sizeof(float) , ComputeBufferType.Default);
         mortonBuffer = new ComputeBuffer(count, sizeof(uint), ComputeBufferType.Default);
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
         
@@ -136,7 +135,7 @@ public class BufferSorter : MonoBehaviour {
         computeShader.SetFloat("angularSpeed", angularSpeed);
         computeShader.SetFloat("DeltaTime", Time.deltaTime);
         computeShader.SetFloat("radius", radius);
-        computeShader.Dispatch(mainKernelHandler, count / 512, 1, 1);
+        computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
 
        
         internalNodeBuffer.GetData(nodeData);
@@ -147,14 +146,14 @@ public class BufferSorter : MonoBehaviour {
 
     public float GizmoPosScale = 1;
     public float GizmoScale = 1;
-    public bool visualizeBoundingSpheres = false;
+    public bool visualizeBoundingBoxes = false;
     void OnDrawGizmos()
     {
-        if(visualizeBoundingSpheres)
-        VisualizeBoundingSpheres();
+        if(visualizeBoundingBoxes)
+        VisualizeBoundingBoxes();
     }
 
-    void VisualizeBoundingSpheres()
+    void VisualizeBoundingBoxes()
     {
         foreach (var node in nodeData)
         {

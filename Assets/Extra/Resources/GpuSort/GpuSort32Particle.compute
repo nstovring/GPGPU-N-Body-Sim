@@ -34,6 +34,7 @@ cbuffer CB
 struct particle{
 float3 pos;
 float3 dir;
+float radius;
 uint morton;
 int collision;
 };

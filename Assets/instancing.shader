@@ -22,11 +22,12 @@
             float2 uv_MainTex;
         };
 		struct particle{
-	float3 pos;
-	float3 dir;
-	uint morton;
-	int collision;
-	};
+			float3 pos;
+			float3 dir;
+			float radius;
+			uint morton;
+			int collision;
+		};
     #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
 	
         StructuredBuffer<particle> positionBuffer;
@@ -38,15 +39,17 @@
             sincos(r, s, c);
             v = float2(v.x * c - v.y * s, v.x * s + v.y * c);
         }
-		//particle part;
+		//particle myParticle;
 				float3 direction;
 				float3 position;
+				float radius;
 				uint morton;
 				int collision;
         void setup()
         {
         #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
-            float4 data = float4(positionBuffer[unity_InstanceID].pos * 20,0.5);
+			radius = positionBuffer[unity_InstanceID].radius;
+            float4 data = float4(positionBuffer[unity_InstanceID].pos * 20, radius * 20);
 			direction = positionBuffer[unity_InstanceID].dir;
 			position = positionBuffer[unity_InstanceID].pos;
 			morton =  positionBuffer[unity_InstanceID].morton;
