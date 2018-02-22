@@ -34,7 +34,7 @@ public class BufferSorter : MonoBehaviour {
         public Vector3 direction;
         float radius;
         public uint morton;
-        int collision;
+        public int collision;
     }
     struct internalNode
     {
@@ -123,6 +123,8 @@ public class BufferSorter : MonoBehaviour {
     }
 
     internalNode[] nodeData = new internalNode[count];
+    particle[] particleData = new particle[count];
+
     void DispatchShaders()
     {
         computeShader.Dispatch(mortonKernelHandler, count / 32, 1, 1);
@@ -137,7 +139,7 @@ public class BufferSorter : MonoBehaviour {
         computeShader.SetFloat("radius", radius);
         computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
 
-       
+        inputcomputeBuffer.GetData(particleData);
         internalNodeBuffer.GetData(nodeData);
         //VisualizeBoundingSpheres(nodeData);
 //        Print("", nodeData);
@@ -147,10 +149,25 @@ public class BufferSorter : MonoBehaviour {
     public float GizmoPosScale = 1;
     public float GizmoScale = 1;
     public bool visualizeBoundingBoxes = false;
+    public bool visualizePotentialCollisions = false;
+
     void OnDrawGizmos()
     {
         if(visualizeBoundingBoxes)
         VisualizeBoundingBoxes();
+        if (visualizePotentialCollisions)
+            VisualisePotentialCollisions();
+    }
+
+    void VisualisePotentialCollisions()
+    {
+        foreach (var leaf in particleData)
+        {
+            int collisionID = leaf.collision;
+            if (collisionID != -1 && collisionID != -2)
+                Gizmos.DrawLine(leaf.position *GizmoPosScale, particleData[leaf.collision].position * GizmoPosScale);
+        }
+
     }
 
     void VisualizeBoundingBoxes()
@@ -161,7 +178,6 @@ public class BufferSorter : MonoBehaviour {
             Vector3 center = (node.sPos + node.maxPos) / 2;
             Vector3 scale = new Vector3(node.maxPos.x - node.sPos.x, node.maxPos.y - node.sPos.y, node.maxPos.z - node.sPos.z);
             Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
-            //Gizmos.DrawWireSphere(node.sPos * GizmoPosScale, node.sRadius * GizmoScale);
         }
     }
 

@@ -72,7 +72,7 @@
 
         void surf (Input IN, inout SurfaceOutputStandard o) {
             fixed4 c = tex2D (_MainTex, IN.uv_MainTex);
-            o.Albedo = lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
+            o.Albedo =float3(1,1,1);// lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
             o.Metallic = _Metallic;
             o.Smoothness = _Glossiness;
             o.Alpha = c.a;
