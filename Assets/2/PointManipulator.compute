@@ -634,7 +634,7 @@ int BinarySearch(int idx, uint mortonCode){
     }
     while ((arraySize)*stepScale > 0 && step >= 0 && step < count );
 
-    return normalizedIndex;
+    return normalizedIndex + 1;
 }
 
 RWStructuredBuffer<particle> mergeBuffer;
@@ -642,7 +642,7 @@ RWStructuredBuffer<particle> mergeBuffer;
 [numthreads(512,1,1)]
 void CSMerge (uint3 id : SV_DispatchThreadID){
 	int newPos = BinarySearch(id.x, inputPoints[id.x].mortonId);
-	//mergeBuffer[newPos] = inputPoints[id.x];
+	mergeBuffer[newPos] = inputPoints[id.x];
 	GroupMemoryBarrierWithGroupSync();
 	inputPoints[id.x].mortonId = newPos;//mergeBuffer[id.x].mortonId;
 	//inputPoints[newPos] = temp;

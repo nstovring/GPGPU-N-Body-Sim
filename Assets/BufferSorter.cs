@@ -118,7 +118,7 @@ public class BufferSorter : MonoBehaviour {
         computeShader.Dispatch(mergeKernelHandler, count / 512, 1, 1);
 
         data = new particle[count];
-        inputcomputeBuffer.GetData(data);
+        mergeBuffer.GetData(data);
         Print("Merged Data", data);
 
         //Create Tree
