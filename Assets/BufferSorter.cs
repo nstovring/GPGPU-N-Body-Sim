@@ -109,8 +109,8 @@ public class BufferSorter : MonoBehaviour {
         sortShader.Dispatch(sortingKernelHandler, (int)((count / 512)), 1, 1);
 
         particle[] data = new particle[count];
-        inputcomputeBuffer.GetData(data);
-        Print("Sorted Data", data);
+        //inputcomputeBuffer.GetData(data);
+        //Print("Sorted Data", data, true);
 
         ////Merge Arrays
         computeShader.SetBuffer(mergeKernelHandler, "inputPoints", inputcomputeBuffer);
@@ -119,7 +119,7 @@ public class BufferSorter : MonoBehaviour {
 
         data = new particle[count];
         inputcomputeBuffer.GetData(data);
-        Print("Merged Data", data);
+        Print("Merged Data", data, false);
 
         ////Create Tree
         //computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", mergeBuffer);
@@ -303,7 +303,7 @@ public class BufferSorter : MonoBehaviour {
     }
 
 
-    void Print(string name, particle[] array)
+    void Print(string name, particle[] array, bool divided)
     {
         string values = "";
         string problems = "";
@@ -312,8 +312,10 @@ public class BufferSorter : MonoBehaviour {
         {
             if ((i != 0) && (array[i - 1].morton > array[i].morton))
                 problems += "Discontinuity found at " + i + "!! \n";
-            //values += (int)array[i].morton / 10000000 + " ";
-            values += (int)array[i].morton + " ";
+            if(divided)
+            values += (int)array[i].morton / 10000000 + " ";
+            else
+            values += (int)array[i].collision + " ";
         }
 
         Debug.Log(name + " :  " + values + "\n" + problems);

@@ -604,7 +604,7 @@ int BinarySearch(int idx, uint mortonCode){
 	int normalizedIndex = idx%arraySize;
 	int direction = 0;
 	int center = ((idx + arraySize)%count) - normalizedIndex + arraySize/2;
-	int step = center;
+	int step = center - 1;
 	float stepScale = 0.25;
     do
     {
@@ -619,16 +619,16 @@ int BinarySearch(int idx, uint mortonCode){
 			direction = -1 * (arraySize)*stepScale;
 			stepScale *= 0.5;
 			//if((arraySize)*stepScale < 1){
-			//	return (normalizedIndex - 1)%count;
+			//	return  (idx)%count;
 			//}
 			
 		}
 		else if(pluOne < mortonCode){
 			direction = 1 * (arraySize)*stepScale;
 			stepScale *= 0.5;
-			if((arraySize)*stepScale < 1){
-				return ((normalizedStep +1) + normalizedIndex + 1)%count;
-			}
+			//if((arraySize)*stepScale < 1){
+			//	return ((normalizedStep +1) + normalizedIndex + 1)%count;
+			//}
 		}else if (middle < mortonCode && pluOne > mortonCode)
         {
 			return ((normalizedStep) + normalizedIndex + 1)%count;
@@ -644,9 +644,11 @@ RWStructuredBuffer<particle> mergeBuffer;
 [numthreads(512,1,1)]
 void CSMerge (uint3 id : SV_DispatchThreadID){
 	int newPos = BinarySearch(id.x, inputPoints[id.x].mortonId);
+	inputPoints[id.x].mortonId;
+	inputPoints[id.x].collision = newPos;
 	//mergeBuffer[newPos] = inputPoints[id.x];
-	GroupMemoryBarrierWithGroupSync();
-	inputPoints[id.x].mortonId = newPos;//mergeBuffer[id.x].mortonId;
+	//GroupMemoryBarrierWithGroupSync();
+	//inputPoints[id.x].mortonId = newPos;//mergeBuffer[id.x].mortonId;
 	//inputPoints[newPos] = temp;
 	//inputPoints[id.x].mortonId = newPos;
 
