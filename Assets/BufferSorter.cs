@@ -118,31 +118,31 @@ public class BufferSorter : MonoBehaviour {
         computeShader.Dispatch(mergeKernelHandler, count / 512, 1, 1);
 
         data = new particle[count];
-        mergeBuffer.GetData(data);
+        inputcomputeBuffer.GetData(data);
         Print("Merged Data", data);
 
-        //Create Tree
-        computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", mergeBuffer);
-        computeShader.SetBuffer(treeConstructionKernelhandler, "internalNodes", internalNodeBuffer);
-        computeShader.SetBuffer(treeConstructionKernelhandler, "leafNodes", leafNodeBuffer);
-        computeShader.Dispatch(treeConstructionKernelhandler, count / 512, 1, 1);
-
-        internalNode[] nodeData = new internalNode[count];
+        ////Create Tree
+        //computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", mergeBuffer);
+        //computeShader.SetBuffer(treeConstructionKernelhandler, "internalNodes", internalNodeBuffer);
+        //computeShader.SetBuffer(treeConstructionKernelhandler, "leafNodes", leafNodeBuffer);
+        //computeShader.Dispatch(treeConstructionKernelhandler, count / 512, 1, 1);
+        //
+        //internalNode[] nodeData = new internalNode[count];
+        ////internalNodeBuffer.GetData(nodeData);
+        ////Print("", nodeData);
+        ////Create bounding sphere
+        //computeShader.SetBuffer(boundingSphereKernelHandler, "inputPoints", mergeBuffer);
+        //computeShader.SetBuffer(boundingSphereKernelHandler, "internalNodes", internalNodeBuffer);
+        //computeShader.SetBuffer(boundingSphereKernelHandler, "leafNodes", leafNodeBuffer);
+        //computeShader.Dispatch(boundingSphereKernelHandler, count / 512, 1, 1);
         //internalNodeBuffer.GetData(nodeData);
         //Print("", nodeData);
-        //Create bounding sphere
-        computeShader.SetBuffer(boundingSphereKernelHandler, "inputPoints", mergeBuffer);
-        computeShader.SetBuffer(boundingSphereKernelHandler, "internalNodes", internalNodeBuffer);
-        computeShader.SetBuffer(boundingSphereKernelHandler, "leafNodes", leafNodeBuffer);
-        computeShader.Dispatch(boundingSphereKernelHandler, count / 512, 1, 1);
-        internalNodeBuffer.GetData(nodeData);
-        Print("", nodeData);
-        //Apply Movement
-        computeShader.SetBuffer(mainKernelHandler, "internalNodes", mergeBuffer);
-        computeShader.SetBuffer(mainKernelHandler, "leafNodes", leafNodeBuffer);
-        computeShader.SetBuffer(mainKernelHandler, "inputPoints", inputcomputeBuffer);
-        computeShader.SetBuffer(mainKernelHandler, "mortonIds", mortonBuffer);
-        computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
+        ////Apply Movement
+        //computeShader.SetBuffer(mainKernelHandler, "internalNodes", mergeBuffer);
+        //computeShader.SetBuffer(mainKernelHandler, "leafNodes", leafNodeBuffer);
+        //computeShader.SetBuffer(mainKernelHandler, "inputPoints", inputcomputeBuffer);
+        //computeShader.SetBuffer(mainKernelHandler, "mortonIds", mortonBuffer);
+        //computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
 
     }
 	
