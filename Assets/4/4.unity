@@ -3861,19 +3861,22 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   computeShader: {fileID: 7200000, guid: bc91f4d2be8c39b45b14fa1b1e5a0c36, type: 3}
+  sortShader: {fileID: 7200000, guid: 275201ab5c2e8a64f9cca7db6d932220, type: 3}
   mat: {fileID: 2100000, guid: 76fa2a5294f612145a6b026960cf3a1b, type: 2}
   ballmat: {fileID: 2100000, guid: 47646212524189d41a3b5e5e8af68907, type: 2}
   particleSystem: {fileID: 0}
   speed: 0.161
-  angularSpeed: 1
+  angularSpeed: 0
   gravityMul: 1
-  radius: 0.05
-  gravityVec: {x: 0, y: -1, z: 0}
+  diameter: 0.05
+  gravityVec: {x: 0, y: 0, z: 0}
+  boundingBoxMin: 1
   cubeMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   instanceMaterial: {fileID: 2100000, guid: 1cd3f0037b6662b44aa7105e8aa0b583, type: 2}
   GizmoPosScale: 20
   GizmoScale: 20
   visualizeBoundingBoxes: 0
+  visualizePotentialCollisions: 1
 --- !u!81 &2130259646
 AudioListener:
   m_ObjectHideFlags: 0

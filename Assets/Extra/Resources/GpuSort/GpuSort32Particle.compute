@@ -34,6 +34,7 @@ cbuffer CB
 struct particle{
 float3 pos;
 float3 dir;
+float3 color;
 float radius;
 uint morton;
 int collision;
@@ -100,12 +101,14 @@ groupshared uint f[GROUP_THREADS];
 groupshared uint d[GROUP_THREADS];
 groupshared uint totalFalses;
 
+int count;
 
 [numthreads(THREADX, 1, 1)]
 void RadixSort(uint3 Gid  : SV_GroupID,
 	uint3 DTid : SV_DispatchThreadID,
 	uint3 GTid : SV_GroupThreadID,
 	uint  GI : SV_GroupIndex){
+
 	//uint idx = DTid.x + DTid.y * c_width;
 	o[GI] = Data[ DTid.x];
 	// loop through each bit
@@ -171,8 +174,11 @@ void RadixSort(uint3 Gid  : SV_GroupID,
 		GroupMemoryBarrierWithGroupSync(); // wait for o to be fully populated
 
 	}
-
-	Data[DTid.x] = o[d[GI]];
+	//	uint count,stride;
+	//Input.GetDimensions(count,stride);
+	//int groups = count/GROUP_THREADS;
+	//int groupnumber = DTid.x/count;
+	Data[DTid.x]= o[d[GI]]; //DTid.x% GROUP_THREADS) +(DTid.x% GROUP_THREADS) + groupnumber
 	
 	}
 

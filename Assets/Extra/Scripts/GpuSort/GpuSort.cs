@@ -16,6 +16,7 @@ static public class GpuSort
 
     private const uint BITONIC_BLOCK_SIZE = 512;
     private const uint TRANSPOSE_BLOCK_SIZE = 512;
+    static public int count = 512;
 
     // ---- Members ----
 
@@ -83,10 +84,10 @@ static public class GpuSort
             Debug.LogError("Input array size should be multiple of the Bitonic block size!");
 
         // Determine parameters.
-        uint NUM_ELEMENTS = (uint) inBuffer.count;
+        int NUM_ELEMENTS =  inBuffer.count;
         uint MATRIX_WIDTH = BITONIC_BLOCK_SIZE;
-        uint MATRIX_HEIGHT = NUM_ELEMENTS / BITONIC_BLOCK_SIZE;
-
+        uint MATRIX_HEIGHT = 0;// NUM_ELEMENTS / BITONIC_BLOCK_SIZE;
+        shader.SetInt("count", NUM_ELEMENTS);
         shader.SetBuffer(kSort, "Data", inBuffer);
         shader.Dispatch(kSort, (int)((NUM_ELEMENTS / BITONIC_BLOCK_SIZE)),1, 1);
         return;

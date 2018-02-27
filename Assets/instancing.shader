@@ -24,6 +24,7 @@
 		struct particle{
 			float3 pos;
 			float3 dir;
+			float3 color;
 			float radius;
 			uint morton;
 			int collision;
@@ -42,6 +43,7 @@
 		//particle myParticle;
 				float3 direction;
 				float3 position;
+				float3 color;
 				float radius;
 				uint morton;
 				int collision;
@@ -54,6 +56,7 @@
 			position = positionBuffer[unity_InstanceID].pos;
 			morton =  positionBuffer[unity_InstanceID].morton;
 			collision = positionBuffer[unity_InstanceID].collision;
+			color = positionBuffer[unity_InstanceID].color;
             //float rotation = data.w * data.w * _Time.y * 0.5f;
             //rotate2D(data.xz, rotation);
 
@@ -72,7 +75,7 @@
 
         void surf (Input IN, inout SurfaceOutputStandard o) {
             fixed4 c = tex2D (_MainTex, IN.uv_MainTex);
-            o.Albedo =float3(1,1,1);// lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
+            o.Albedo = position;// float3(1,1,1) * color;// lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
             o.Metallic = _Metallic;
             o.Smoothness = _Glossiness;
             o.Alpha = c.a;

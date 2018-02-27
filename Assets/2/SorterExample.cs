@@ -55,7 +55,7 @@ public class SorterExample : MonoBehaviour {
         tempBuffer = new ComputeBuffer(mortonData.Length, sizeof(uint));
 
         mortonBuffer.SetData(mortonData);
-        GpuSort.BitonicSort32(mortonBuffer, tempBuffer);
+        //GpuSort.BitonicSort32(mortonBuffer, tempBuffer);
         mortonBuffer.GetData(mortonData);
 
         Print("Sorted", mortonData);

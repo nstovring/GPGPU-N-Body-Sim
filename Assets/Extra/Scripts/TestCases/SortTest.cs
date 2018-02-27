@@ -18,7 +18,7 @@ public class SortTest : MonoBehaviour
         tempBuffer = new ComputeBuffer(inArray.Length, 4);
 
         inBuffer.SetData(inArray);
-        GpuSort.BitonicSort32(inBuffer, tempBuffer);
+      //  GpuSort.BitonicSort32(inBuffer, tempBuffer);
         inBuffer.GetData(inArray);
 
         Print("Sorted", inArray);
