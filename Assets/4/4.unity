@@ -3876,7 +3876,7 @@ MonoBehaviour:
   GizmoPosScale: 20
   GizmoScale: 20
   visualizeBoundingBoxes: 0
-  visualizePotentialCollisions: 1
+  visualizePotentialCollisions: 0
 --- !u!81 &2130259646
 AudioListener:
   m_ObjectHideFlags: 0
