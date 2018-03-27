@@ -5,7 +5,7 @@ using UnityEngine;
 public class BufferSorter : MonoBehaviour {
     public ComputeBuffer inputcomputeBuffer;
     //public ComputeBuffer sortcomputeBuffer;
-    public ComputeBuffer mortonBuffer, leafNodeBuffer, internalNodeBuffer, mergeBuffer,tempBuffer;//,o ,e ,f, d;
+    public ComputeBuffer leafNodeBuffer, internalNodeBuffer;//,o ,e ,f, d;
     private ComputeBuffer argsBuffer;
     private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
     
@@ -14,14 +14,12 @@ public class BufferSorter : MonoBehaviour {
     public Material mat;
     public Material ballmat;
 
-    public ParticleSystem particleSystem;
-
     RenderTexture pointRt;
     RenderTexture velRt;
     //const int count = 10554096;
     private int cachedInstanceCount = -1;
 
-    public const int count = 1024;
+    public const int count = 2048;
 
     const float size = 1f;
     [Range(0.001f, 1f)]
@@ -31,8 +29,8 @@ public class BufferSorter : MonoBehaviour {
     [Range(0.001f,1f)]
     public float diameter = 0.05f;
     public Vector3 gravityVec = new Vector3(0, -1,0);
-    [Range(0, count-1)]
-    public int boundingBoxMin = 1;
+
+   
     struct particle
     {
         public Vector3 position;
@@ -49,7 +47,7 @@ public class BufferSorter : MonoBehaviour {
         public int parentId;
         public int2 intNodes;
         public int2 leaves;
-        public Vector3 sPos;
+        public Vector3 minPos;
         public Vector3 maxPos;
         public float sRadius;
         public int visited;
@@ -73,11 +71,9 @@ public class BufferSorter : MonoBehaviour {
         leafNodeBuffer = new ComputeBuffer(count, nodeStructSize, ComputeBufferType.Default);
         internalNodeBuffer = new ComputeBuffer(count -1, nodeStructSize, ComputeBufferType.Default);
         inputcomputeBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
-        mergeBuffer = new ComputeBuffer(count, sizeof(int), ComputeBufferType.Default);
         //sortcomputeBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
         //mortonBuffer = new ComputeBuffer(count, sizeof(uint), ComputeBufferType.Default);
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
-        tempBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
         //Apply buffer for instanced mesh drawing 
         instanceMaterial.SetBuffer("positionBuffer", inputcomputeBuffer);
         uint numIndices = (cubeMesh != null) ? (uint)cubeMesh.GetIndexCount(0) : 0;
@@ -95,86 +91,60 @@ public class BufferSorter : MonoBehaviour {
         mortonKernelHandler = computeShader.FindKernel("CSSortMortonIDs");
         treeConstructionKernelhandler = computeShader.FindKernel("CSCreateBVH");
         boundingSphereKernelHandler = computeShader.FindKernel("CSGenerateBoundingSpheres");
-        mergeKernelHandler = computeShader.FindKernel("CSMerge");
+        //mergeKernelHandler = computeShader.FindKernel("CSMerge");
         sortingKernelHandler = sortShader.FindKernel("RadixSort");
         //Create MortonIDs
         computeShader.SetBuffer(mortonKernelHandler, "inputPoints", inputcomputeBuffer);
         computeShader.Dispatch(mortonKernelHandler, count / 32, 1, 1);
         Debug.Log("Dispatched morton kernel");
-        //Sort IDs
+        ////Sort IDs
         sortShader.SetInt("count", count);
         sortShader.SetBuffer(sortingKernelHandler, "Data", inputcomputeBuffer);
         sortShader.Dispatch(sortingKernelHandler, count / 512, 1, 1);
         Debug.Log("Dispatched sorting kernel");
-
+        
         particle[] data = new particle[count];
         inputcomputeBuffer.GetData(data);
-        Print("Sorted Data", data, true);
-
-        //////Merge Arrays
-        //computeShader.SetBuffer(mergeKernelHandler, "inputPoints", inputcomputeBuffer);
-        //computeShader.SetBuffer(mergeKernelHandler, "mergeBuffer", mergeBuffer);
-        //computeShader.Dispatch(mergeKernelHandler, count / 32, 1, 1);
-        //Debug.Log("Dispatch merging kernel");
-
-
-        //int[] mergedata = new int[count];
-        //mergeBuffer.GetData(mergedata);
-        //Print("Merged Data", mergedata);
-        //
-        ////data = new particle[count];
-        //inputcomputeBuffer.GetData(data);
-        //Print("Merged Data in InputBuffer", data, true);
-
+        //Print("Sorted Data", data, true);
+        
         ////Create Tree
         computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", inputcomputeBuffer);
         computeShader.SetBuffer(treeConstructionKernelhandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(treeConstructionKernelhandler, "leafNodes", leafNodeBuffer);
-        computeShader.Dispatch(treeConstructionKernelhandler, count / 512, 1, 1);
+        computeShader.Dispatch(treeConstructionKernelhandler, count / 32, 1, 1);
         Debug.Log("Dispatched tree contruction kernel");
-
+        
         internalNode[] nodeData = new internalNode[count];
         internalNodeBuffer.GetData(nodeData);
         Print("Node Data", nodeData, false);
-
+        
         leafNodeBuffer.GetData(nodeData);
         Print("Leaf Data", nodeData, true);
-        //internalNodeBuffer.GetData(nodeData);
-        //Print("", nodeData);
+
         //Create bounding sphere
         computeShader.SetBuffer(boundingSphereKernelHandler, "inputPoints", inputcomputeBuffer);
         computeShader.SetBuffer(boundingSphereKernelHandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(boundingSphereKernelHandler, "leafNodes", leafNodeBuffer);
         computeShader.Dispatch(boundingSphereKernelHandler, count / 32, 1, 1);
         Debug.Log("Dispatched bounding calculation kernel");
-
+        
         
         //Apply Movement
         computeShader.SetBuffer(mainKernelHandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(mainKernelHandler, "leafNodes", leafNodeBuffer);
         computeShader.SetBuffer(mainKernelHandler, "inputPoints", inputcomputeBuffer);
-        //computeShader.SetBuffer(mainKernelHandler, "mortonIds", mortonBuffer);
-        computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
+        computeShader.Dispatch(mainKernelHandler, count / 256, 1, 1);
         Debug.Log("Dispatched physics kernel");
-        //inputcomputeBuffer.GetData(data);
-        //Print("Sorted Data", data, false);
-        //computeShader.SetBuffer(loadKernelHandler, "mergeBuffer", mergeBuffer);
-        //computeShader.SetBuffer(loadKernelHandler, "inputPoints", inputcomputeBuffer);
-        //computeShader.Dispatch(loadKernelHandler, count / 32, 1, 1);
-        //Graphics.DrawMeshInstancedIndirect(cubeMesh, 0, instanceMaterial, new Bounds(Vector3.zero, new Vector3(0.1f, 0.1f, 0.1f)), argsBuffer);
-
-
     }
 
     // Update is called once per frame
     void Update () {
         DispatchShaders();
         Graphics.DrawMeshInstancedIndirect(cubeMesh, 0, instanceMaterial, new Bounds(Vector3.zero, new Vector3(0.1f, 0.1f, 0.1f)), argsBuffer);
+    }
 
-        if (visualizeBoundingBoxes)
-        {
-           
-        }
+    private void FixedUpdate()
+    {
     }
 
     internalNode[] nodeData = new internalNode[count];
@@ -184,35 +154,39 @@ public class BufferSorter : MonoBehaviour {
     bool swap = true;
     void DispatchShaders()
     {
-       
-        //computeShader.Dispatch(mortonKernelHandler, count / 32, 1, 1);
-        sortShader.Dispatch(sortingKernelHandler, count / 512, 1, 1);
-        //inputcomputeBuffer.GetData(particleData);
-        //inputcomputeBuffer.SetData(particleData);
-        //computeShader.Dispatch(mergeKernelHandler, count / 32, 1, 1);
-        computeShader.Dispatch(treeConstructionKernelhandler, count / 512, 1, 1);
-        computeShader.Dispatch(boundingSphereKernelHandler, count / 32, 1, 1);
         computeShader.SetFloat("speed", speed);
         computeShader.SetFloat("gravity", gravityMul);
         computeShader.SetVector("gravityVec", gravityVec);
         computeShader.SetFloat("angularSpeed", angularSpeed);
         computeShader.SetFloat("DeltaTime", Time.deltaTime);
         computeShader.SetFloat("radius", diameter / 2);
-        computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
-        //computeShader.Dispatch(loadKernelHandler, count / 512, 1, 1);
-
-        //computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
-        
-        //VisualizeBoundingSpheres(nodeData);
-        //        Print("", nodeData);
+        sortShader.Dispatch(sortingKernelHandler, count / 512, 1, 1);
+        computeShader.Dispatch(treeConstructionKernelhandler, count / 32, 1, 1);
+        computeShader.Dispatch(boundingSphereKernelHandler, count / 32, 1, 1);
+        computeShader.Dispatch(mainKernelHandler, count / 256, 1, 1);
 
     }
 
     public float GizmoPosScale = 1;
     public float GizmoScale = 1;
     public bool visualizeBoundingBoxes = false;
+    [Range(0, count - 1)]
+    public int boundingBoxMin = 1;
+    [Range(0, count - 1)]
+    public int boundingBoxInt = 0;
+
     public bool visualizePotentialCollisions = false;
+    [Range(0, count - 1)]
+    public int heirarchyLeafToCheckForCollision = 0;
+
     public bool visualizeHeirarchy = false;
+    [Range(0, count - 1)]
+    public int heirarchyLeaf = 0;
+
+
+    
+
+
     void OnDrawGizmos()
     {
         if (visualizeHeirarchy)
@@ -222,65 +196,63 @@ public class BufferSorter : MonoBehaviour {
         else if (visualizePotentialCollisions)
             VisualisePotentialCollisions();
     }
-    [Range(0, count-1)]
-    public int heirarchyLeaf = 0;
+
     void VisualiseBoundingHeirarchy()
     {
         leafNodeBuffer.GetData(leafData);
         internalNodeBuffer.GetData(nodeData);
         inputcomputeBuffer.GetData(particleData);
-
-        internalNode leaf = leafData[heirarchyLeaf];
-        int parentID = leaf.parentId;
-        int count = 0;
-        do
+        int[] collisions;
+        TraverseBVHIterative(leafData[heirarchyLeaf], diameter / 2, out collisions);
+        Gizmos.color = Color.yellow;
+        Vector3 leafPos = particleData[leafData[heirarchyLeaf].objectId].position;
+        Gizmos.DrawWireSphere(leafPos * GizmoPosScale, (diameter / 2) * GizmoScale);
+        Gizmos.color = Color.white;
+        for (int i = 0; i < collisions.Length; i++)
         {
-            internalNode childA;
-            internalNode childB;
-            
-            Gizmos.DrawLine(leaf.sPos * GizmoPosScale, nodeData[parentID].sPos * GizmoPosScale);
-            Gizmos.DrawWireSphere(leaf.sPos * GizmoPosScale, 0.005f * GizmoScale);
-            leaf = nodeData[parentID];
-            parentID = nodeData[parentID].parentId;
-            count++;
-        } while (parentID != 0 && count < Mathf.Log(count, 2));
+            int col = collisions[i];
+            if(col != -1)
+            {
+                Gizmos.DrawLine(leafPos * GizmoPosScale, particleData[leafData[col].objectId].position * GizmoPosScale);
+                Gizmos.DrawWireSphere(particleData[leafData[col].objectId].position * GizmoPosScale, (diameter / 2) * GizmoScale);
+            }
+        }
+
 
     }
 
     void VisualisePotentialCollisions()
     {
+        leafNodeBuffer.GetData(leafData);
+        internalNodeBuffer.GetData(nodeData);
         inputcomputeBuffer.GetData(particleData);
-        foreach (var leaf in particleData)
-        {
-            int collisionID = leaf.collision;
-            if (collisionID != -1 && collisionID != -2)
-            {
-                Gizmos.color = Color.white;
-                Gizmos.DrawLine(leaf.position * GizmoPosScale, particleData[leaf.collision].position * GizmoPosScale);
-                Gizmos.color = Color.red;
-                if ((int)leaf.color.x != 0)
-                Gizmos.DrawLine(leaf.position * GizmoPosScale, particleData[(int)leaf.color.x].position * GizmoPosScale);
-                Gizmos.color = Color.blue;
-                if ((int)leaf.color.y != 0)
-                Gizmos.DrawLine(leaf.position * GizmoPosScale, particleData[(int)leaf.color.y].position * GizmoPosScale);
-                Gizmos.color = Color.green;
-                if((int)leaf.color.z != 0)
-                Gizmos.DrawLine(leaf.position * GizmoPosScale, particleData[(int)leaf.color.z].position * GizmoPosScale);
+        int[] collisions;
+        TraverseBVHIterative(leafData[heirarchyLeafToCheckForCollision], diameter / 2, out collisions);
+        Vector3 leafPos = particleData[leafData[heirarchyLeafToCheckForCollision].objectId].position;
 
+        for (int i = 0; i < collisions.Length; i++)
+        {
+            int col = collisions[i];
+            if (col != -1)
+            {
+                Gizmos.DrawLine(leafPos * GizmoPosScale, particleData[col].position * GizmoPosScale);
+                Gizmos.DrawWireSphere(particleData[col].position * GizmoPosScale, (diameter / 2) * GizmoScale);
             }
         }
-
     }
 
+   
     void VisualizeBoundingBoxes()
     {
+        int recursionCount = boundingBoxInt;
         internalNodeBuffer.GetData(nodeData);
+
         for (int i = boundingBoxMin; i < nodeData.Length; i++)
         {
             internalNode node = nodeData[i];
             //Gizmos.color =  Color.white * (node.overlap);
-            Vector3 center = (node.sPos + node.maxPos) / 2;
-            Vector3 scale = new Vector3(node.maxPos.x - node.sPos.x, node.maxPos.y - node.sPos.y, node.maxPos.z - node.sPos.z);
+            Vector3 center = (node.minPos + node.maxPos) / 2;
+            Vector3 scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
             Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
         }
     }
@@ -302,6 +274,122 @@ public class BufferSorter : MonoBehaviour {
         if (intNodes.y != -1)
             childB = nodeData[intNodes.y];
     }
+
+    public int currentCollisions = 0;
+
+    void TraverseBVHIterative(internalNode leaf, float radius, out int[] collisionList)
+    {
+        internalNode node = nodeData[0];
+        int[] stack = new int[32];
+        collisionList = new int[32];
+        for (uint i = 0; i < 32; i++)
+        {
+            stack[i] = -2;
+            collisionList[i] = -1;
+        }
+
+        
+        int traversalCount = 0;
+        int collisionCount = 0;
+        int maxLoop = 0;
+        Gizmos.color = Color.green;
+        Vector3 AABBRadius = new Vector3(radius, radius, radius) * angularSpeed;
+        Vector3 scale = AABBRadius;// new Vector3(leaf.maxPos.x - leaf.minPos.x, leaf.maxPos.y - leaf.minPos.y, leaf.maxPos.z - leaf.minPos.z);
+        Gizmos.DrawWireCube(((leaf.minPos + leaf.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
+    
+        do
+        {
+            internalNode childA;
+            internalNode childB;
+            GetNodeChildren(node, out childA,out childB);
+
+            AABBRadius = new Vector3(radius, radius, radius) * angularSpeed;
+            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos, childA.maxPos)&& childA.nodeId != -1;
+            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos, childB.maxPos)&& childB.nodeId != -1;
+
+            //Gizmos.color = Color.blue;
+            //Gizmos.DrawLine(childA.minPos * GizmoPosScale, childB.minPos * GizmoPosScale);
+            //
+            if(overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)
+            {
+                Gizmos.color = Color.blue;
+                scale = new Vector3(childA.maxPos.x - childA.minPos.x, childA.maxPos.y - childA.minPos.y, childA.maxPos.z - childA.minPos.z);
+                Gizmos.DrawWireCube(((childA.minPos + childA.maxPos) / 2) * GizmoPosScale, AABBRadius * GizmoScale );
+            
+            }
+            if (overlapB && isLeaf(childB) && childA.objectId != leaf.objectId)
+            {
+                Gizmos.color = Color.red;
+                scale = new Vector3(childB.maxPos.x - childB.minPos.x, childB.maxPos.y - childB.minPos.y, childB.maxPos.z - childB.minPos.z);
+                Gizmos.DrawWireCube(((childB.minPos + childB.maxPos) / 2) * GizmoPosScale, AABBRadius * GizmoScale);
+            }
+            Gizmos.color = Color.white;
+
+            //Gizmos.DrawWireCube(((node.minPos + node.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
+            if (overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)
+            {
+                collisionList[collisionCount] = childA.nodeId;
+                collisionCount++;
+            }
+            if (overlapB && isLeaf(childB) && childB.objectId != leaf.objectId)
+            {
+                collisionList[collisionCount] = childB.nodeId;
+                collisionCount++;
+            }
+            currentCollisions = collisionCount;
+
+            bool traverseA = (overlapA && !isLeaf(childA));
+            bool traverseB = (overlapB && !isLeaf(childB));
+            //Debug.Log(stack[traversalCount]);
+
+            if (!traverseA && !traverseB)
+            {
+                stack[traversalCount] = -1;
+                traversalCount--;
+                traversalCount = traversalCount <= 0 ? 0 : traversalCount;
+                if (stack[traversalCount] == -1)
+                {
+                    //Debug.Log("Popping Stack : MaxLoop," + maxLoop);
+                    return;
+                }
+                node = nodeData[stack[traversalCount]];
+            }
+            else
+            {
+                if (traverseA)
+                    node = childA;
+                else
+                    node = childB;
+
+                if (traverseA && traverseB)
+                {
+                    stack[traversalCount] = childB.nodeId;
+                    //Gizmos.color = Color.red;
+                    //scale = new Vector3(childB.maxPos.x - childB.minPos.x, childB.maxPos.y - childB.minPos.y, childB.maxPos.z - childB.minPos.z);
+                    //Gizmos.DrawWireCube(((childB.minPos + childB.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
+
+                    traversalCount++;
+                    //Debug.Log("Pushing Stack");
+                }
+            }
+            maxLoop++;
+        } while (stack[traversalCount] != -1 && maxLoop < 64);//traversing && traversalCount < 64);
+
+    }
+    bool AABBOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+    {
+        return (minA.x <= maxB.x && maxA.x >= minB.x) &&
+            (minA.y <= maxB.y && maxA.y >= minB.y) &&
+            (minA.z <= maxB.z && maxA.z >= minB.z);
+    }
+
+    bool isLeaf(internalNode node)
+    {
+        if (node.objectId != -1)
+            return true;
+        return false;
+    }
+
     Vector3[] GetVectorPoints()
     {
         Vector3[] points = new Vector3[count];
@@ -331,13 +419,11 @@ public class BufferSorter : MonoBehaviour {
     void OnDestroy()
     {
         inputcomputeBuffer.Release();
-        tempBuffer.Release();
         internalNodeBuffer.Release();
         leafNodeBuffer.Release();
         if (argsBuffer != null)
             argsBuffer.Release();
         argsBuffer = null;
-        mergeBuffer.Release();
     }
 
     void Print(string name, uint[] array)
@@ -395,13 +481,20 @@ public class BufferSorter : MonoBehaviour {
 
         for (int i = 0; i < array.Length; i++)
         {
+            if ((i != 0) && (array[i - 1].mortonId > array[i].mortonId))
+                problems += "Discontinuity found at " + i + "!! \n";
+            if (leaf)
+                values += (int)array[i].mortonId / 10000000 + " ";
+            else
+                values += (int)array[i].mortonId / 1000 + " ";
+
             //if ((i != 0) && (array[i - 1].morton > array[i].morton))
             //    problems += "Discontinuity found at " + i + "!! \n";
             // values += "<" + array[i].sPos.ToString() + ":" + array[i].sRadius + "> " + "\n";// + "\n" + "<" + array[i].intNodes.x + ":" + array[i].intNodes.y + ">__" + "\n";
-            if(leaf)
-            values += array[i].parentId + ", "+ array[i].objectId + " , Morton ->" + array[i].mortonId +"\n";
-            else
-            values += array[i].parentId + " Leaves>(" + array[i].leaves.x + "," + array[i].leaves.y + ")  " + " Nodes>(" + array[i].intNodes.x + ":" + array[i].intNodes.y + ") Morton ->" + array[i].mortonId + "\n";
+            //if (leaf)
+            //values += array[i].parentId + ", "+ array[i].objectId + " , Morton ->" + array[i].mortonId +"\n";
+            //else
+            //values += array[i].parentId + " Leaves>(" + array[i].leaves.x + "," + array[i].leaves.y + ")  " + " Nodes>(" + array[i].intNodes.x + ":" + array[i].intNodes.y + ") Morton ->" + array[i].mortonId + "\n";
 
         }
 

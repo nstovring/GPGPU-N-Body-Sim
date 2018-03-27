@@ -1,0 +1,109 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+#pragma kernel CSSprings
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+struct particle{
+	float3 position;
+	float3 velocity;
+	float mass;
+	int isFixed;
+	int iD;
+	int springs[12];
+};
+
+struct spring {
+	float damping;
+	float stiffness;
+	int connectionA;
+	int connectionB;
+};
+
+RWStructuredBuffer<particle> particles;
+RWStructuredBuffer<spring> springs;
+
+float deltaTime;
+float stiffness;
+float damping;
+float mass;
+
+float3 fixedPos;
+
+float3 Normalize(float3 v) {
+	float len = length(v);
+	float3 normal = (len == 0.0) ? float3(0.0, 0.0, 0.0) : v / len;
+	return normal;
+}
+bool IsValidSpring(int x)
+{
+	if (x != -1)
+		return true;
+	return false;
+}
+[numthreads(8,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	// TODO: insert actual code here!
+	particle p = particles[id.x];
+	if (!(p.isFixed == 1)) {
+		float3 gravity = float3(0, -9.8, 0);
+		//float Mass = mass;
+		float3 dampingForce = float3(0,0,0);
+		float3 springForce = float3(0,0,0);
+
+		for (int i = 0; i < 12; i++)
+		{
+			if (IsValidSpring(p.springs[i])) {
+				spring s = springs[p.springs[i]];
+		
+				dampingForce += damping * (-1 * Normalize(p.velocity)) *(length(p.velocity));
+
+				bool N = particles[s.connectionB].iD == p.iD;
+				if (particles[s.connectionB].iD == p.iD) {
+					springForce += -stiffness * (p.position - particles[s.connectionA].position) *pow(distance(p.position, particles[s.connectionA].position),3);
+				}																				
+				else {																			
+					springForce += -stiffness * (p.position - particles[s.connectionB].position) *pow(distance(p.position, particles[s.connectionB].position),3);
+				}
+			}
+		
+		}
+		float3 force = dampingForce + springForce + mass * gravity;
+		float3 acceleration = force / mass;
+
+		p.velocity = p.velocity + acceleration * deltaTime;
+		p.position = p.position + p.velocity * deltaTime;
+
+		particles[id.x].position = p.position;
+		particles[id.x].velocity = p.velocity;
+	}
+	else {
+		if (particles[id.x].iD == 0) {
+			particles[id.x].position = p.position + (fixedPos - p.position);
+			particles[id.x].velocity = p.velocity;
+		}
+	
+	}
+
+}
+
+
+[numthreads(8, 1, 1)]
+void CSSprings(uint3 id : SV_DispatchThreadID) {
+
+	spring s = springs[id.x];
+
+	particle a = particles[s.connectionA];
+	particle b = particles[s.connectionB];
+
+	float dist =pow( distance(b.position, a.position),4);
+	float3 N = normalize(b.position - a.position);
+
+	//a.velocity +=;
+	//b.velocity += ;
+	particles[s.connectionA].velocity += N * dist * deltaTime* 0.001;
+	particles[s.connectionB].velocity += -N * dist * deltaTime * 0.001;
+
+}
