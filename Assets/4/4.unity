@@ -3902,13 +3902,30 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   clothComputeShader: {fileID: 7200000, guid: 45cc4076de2c188439f5fe22a395781c, type: 3}
   count: 512
-  selectedParticle: 0
-  stiffness: 40
-  damping: 0.27
-  mass: 0.2
+  stiffness: 7
+  damping: 0.731
+  mass: 1
   clothHandler: {fileID: 1952070140}
+  structuralSpringVars:
+    damping: 0.5
+    stiffness: 100
+  shearSpringVars:
+    damping: 0.5
+    stiffness: 100
+  structuralBendingSpringVars:
+    damping: 0.153
+    stiffness: 50.3
+  shearBendingSpringVars:
+    damping: 0.181
+    stiffness: 52.6
   printDebug: 0
   drawCloth: 1
+  drawStructuralSprings: 1
+  drawShearSprings: 0
+  drawStructuralBendingSprings: 0
+  drawShearBendingSprings: 1
+  showForSingleParticle: 0
+  selectedParticle: 0
 --- !u!4 &1732396342
 Transform:
   m_ObjectHideFlags: 0

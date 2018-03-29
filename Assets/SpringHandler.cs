@@ -24,7 +24,8 @@ static class SpringHandler
         public int iD;
         public int4 structuralSprings;
         public int4 shearSprings;
-        public int4 bendingSprings;
+        public int4 structutralBendingSprings;
+        public int4 shearBendingSprings;
     };
 
     public static spring GetSpring(int x, int y, int rows, out int connectedParticleIndex, int rangeX, int rangeY)
@@ -32,6 +33,17 @@ static class SpringHandler
         spring Spring = new spring();
         Spring.connectionA = y + (x * rows);
         Spring.connectionB = (y + ((x + rangeX) * rows) + rangeY);
+        connectedParticleIndex = (y + ((x + rangeX) * rows) + rangeY);
+        return Spring;
+    }
+
+    public static spring GetSpring(int x, int y, int rows, out int connectedParticleIndex, int rangeX, int rangeY,ClothSimulator.SpringVariables vars)
+    {
+        spring Spring = new spring();
+        Spring.connectionA = y + (x * rows);
+        Spring.connectionB = (y + ((x + rangeX) * rows) + rangeY);
+        Spring.damping = vars.damping;
+        Spring.stiffness = vars.stiffness;
         connectedParticleIndex = (y + ((x + rangeX) * rows) + rangeY);
         return Spring;
     }

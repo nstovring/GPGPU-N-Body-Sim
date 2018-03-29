@@ -11,7 +11,7 @@ struct particle{
 	float mass;
 	int isFixed;
 	int iD;
-	int springs[12];
+	int springs[16];
 };
 
 struct spring {
@@ -21,6 +21,7 @@ struct spring {
 	int connectionB;
 };
 
+RWStructuredBuffer<particle> testParticles;
 RWStructuredBuffer<particle> particles;
 RWStructuredBuffer<spring> springs;
 
@@ -50,31 +51,43 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 	if (!(p.isFixed == 1)) {
 		float3 gravity = float3(0, -9.8, 0);
 		//float Mass = mass;
-		float3 dampingForce = float3(0,0,0);
-		float3 springForce = float3(0,0,0);
+		
+		
+		//Euler integration
+		//---------------------------------------------
+		int steps = 16;
+		float delta = deltaTime / steps;
 
-		for (int i = 0; i < 12; i++)
+		for (int j = 0; j < steps; j++)
 		{
-			if (IsValidSpring(p.springs[i])) {
-				spring s = springs[p.springs[i]];
+			float3 dampingForce = float3(0, 0, 0);
+			float3 springForce = float3(0, 0, 0);
 		
-				dampingForce += damping * (-1 * Normalize(p.velocity)) *(length(p.velocity));
+			for (int i = 0; i < p.springs.Length; i++)
+			{
+				if (IsValidSpring(p.springs[i])) {
+					spring s = springs[p.springs[i]];
+			
+					dampingForce += s.damping * (-1 * p.velocity);// Normalize(p.velocity)) *(length(p.velocity));
 
-				bool N = particles[s.connectionB].iD == p.iD;
-				if (particles[s.connectionB].iD == p.iD) {
-					springForce += -stiffness * (p.position - particles[s.connectionA].position) *pow(distance(p.position, particles[s.connectionA].position),3);
-				}																				
-				else {																			
-					springForce += -stiffness * (p.position - particles[s.connectionB].position) *pow(distance(p.position, particles[s.connectionB].position),3);
+					bool N = particles[s.connectionB].iD == p.iD;
+					if (particles[s.connectionB].iD == p.iD) {
+						springForce += -s.stiffness * (p.position - particles[s.connectionA].position)*distance(p.position, particles[s.connectionA].position)*3;
+					}																				
+					else {																			
+						springForce += -s.stiffness * (p.position - particles[s.connectionB].position) *distance(p.position, particles[s.connectionB].position) * 3;
+					}
 				}
+			
 			}
-		
-		}
-		float3 force = dampingForce + springForce + mass * gravity;
-		float3 acceleration = force / mass;
+			float3 force = dampingForce + springForce + mass * gravity;
+			float3 acceleration = force / mass;
 
-		p.velocity = p.velocity + acceleration * deltaTime;
-		p.position = p.position + p.velocity * deltaTime;
+			p.velocity = p.velocity + acceleration * delta;
+			p.position = p.position + p.velocity * delta;
+			
+		}
+		//--------------------------------------------
 
 		particles[id.x].position = p.position;
 		particles[id.x].velocity = p.velocity;
