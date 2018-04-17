@@ -17,20 +17,30 @@ struct particle{
 struct spring {
 	float damping;
 	float stiffness;
+	float restLength;
 	int connectionA;
 	int connectionB;
+	int springType;
 };
 
-RWStructuredBuffer<particle> testParticles;
+struct clothVertex {
+	float3 vertex;
+	int index;
+};
+
 RWStructuredBuffer<particle> particles;
 RWStructuredBuffer<spring> springs;
+RWStructuredBuffer<clothVertex> vertexBuffer;
+StructuredBuffer<float3> initialPositions;
 
 float deltaTime;
 float stiffness;
 float damping;
 float mass;
+float gravityMul;
 
 float3 fixedPos;
+float3 spherePos;
 
 float3 Normalize(float3 v) {
 	float len = length(v);
@@ -46,60 +56,64 @@ bool IsValidSpring(int x)
 [numthreads(8,1,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
-	// TODO: insert actual code here!
 	particle p = particles[id.x];
 	if (!(p.isFixed == 1)) {
-		float3 gravity = float3(0, -9.8, 0);
-		//float Mass = mass;
-		
+		float3 gravity = float3(0, -9.8, 0) * gravityMul;
 		
 		//Euler integration
 		//---------------------------------------------
-		int steps = 16;
+		int steps = 1;
 		float delta = deltaTime / steps;
+		float3 velocity = p.velocity;
+		float3 position = p.position;
 
-		for (int j = 0; j < steps; j++)
+		float3 dampingForce = float3(0, 0, 0);
+		float3 springForce = float3(0, 0, 0);
+
+		for (int i = 0; i < p.springs.Length; i++)
 		{
-			float3 dampingForce = float3(0, 0, 0);
-			float3 springForce = float3(0, 0, 0);
-		
-			for (int i = 0; i < p.springs.Length; i++)
-			{
-				if (IsValidSpring(p.springs[i])) {
-					spring s = springs[p.springs[i]];
-			
-					dampingForce += s.damping * (-1 * p.velocity);// Normalize(p.velocity)) *(length(p.velocity));
+			if (IsValidSpring(p.springs[i])) {
+				spring s = springs[p.springs[i]];
 
-					bool N = particles[s.connectionB].iD == p.iD;
-					if (particles[s.connectionB].iD == p.iD) {
-						springForce += -s.stiffness * (p.position - particles[s.connectionA].position)*distance(p.position, particles[s.connectionA].position)*3;
-					}																				
-					else {																			
-						springForce += -s.stiffness * (p.position - particles[s.connectionB].position) *distance(p.position, particles[s.connectionB].position) * 3;
-					}
+				bool N = particles[s.connectionB].iD == p.iD;
+				if (particles[s.connectionB].iD == p.iD) {
+					dampingForce += s.damping * (particles[s.connectionA].velocity - velocity);// (-1 * Normalize(velocity)) * length(velocity);
+					springForce += (-s.stiffness *(position - particles[s.connectionA].position) * stiffness) * (distance(position, particles[s.connectionA].position) - s.restLength);
+				}																				
+				else {																			
+					dampingForce += s.damping * (particles[s.connectionB].velocity - velocity);
+					springForce += (-s.stiffness *(position - particles[s.connectionB].position)  * stiffness) * ( distance(position, particles[s.connectionB].position) - s.restLength);
 				}
-			
 			}
-			float3 force = dampingForce + springForce + mass * gravity;
-			float3 acceleration = force / mass;
-
-			p.velocity = p.velocity + acceleration * delta;
-			p.position = p.position + p.velocity * delta;
-			
 		}
+
+		//Super Simple Collision
+		float3 c = distance(position + velocity * delta, spherePos) < 0.54 ? Normalize(position + velocity * delta - spherePos) * (1 - distance(position + velocity * delta, spherePos)) : float3(0, 0, 0);
+
+		float3 force = dampingForce + springForce + p.mass * gravity;
+	
+		float3 acceleration = force / p.mass;
+	
+		acceleration *= delta;
+		velocity = velocity + acceleration * delta + c ;
+
+	
+		//velocity *= delta;
+		position = position + velocity * delta;
 		//--------------------------------------------
 
-		particles[id.x].position = p.position;
-		particles[id.x].velocity = p.velocity;
+		
+		particles[id.x].position = position;
+		particles[id.x].velocity = velocity;
+
 	}
 	else {
-		if (particles[id.x].iD == 0) {
-			particles[id.x].position = p.position + (fixedPos - p.position);
-			particles[id.x].velocity = p.velocity;
-		}
-	
+		//float3 endPos = (fixedPos - p.position);
+		
+		particles[id.x].position = initialPositions[id.x] + fixedPos;// p.position + (fixedPos - initialPositions[id.x]);// *deltaTime;// +(fixedPos - p.position) * distance(fixedPos, p.position) * p.iD;
+		particles[id.x].velocity = p.velocity;
 	}
-
+	DeviceMemoryBarrierWithGroupSync();
 }
 
 

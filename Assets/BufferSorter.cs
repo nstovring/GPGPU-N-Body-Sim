@@ -1,14 +1,16 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
-public class BufferSorter : MonoBehaviour {
+public class BufferSorter : MonoBehaviour
+{
     public ComputeBuffer inputcomputeBuffer;
     //public ComputeBuffer sortcomputeBuffer;
-    public ComputeBuffer leafNodeBuffer, internalNodeBuffer;//,o ,e ,f, d;
+    public ComputeBuffer leafNodeBuffer, internalNodeBuffer, indexBuffer, mergeOutputBuffer, boundingLeafNodeBuffer, boundingInternalNodeBuffer;//,o ,e ,f, d;
     private ComputeBuffer argsBuffer;
     private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
-    
+    CommandBuffer cm;
     public ComputeShader computeShader;
     public ComputeShader sortShader;
     public Material mat;
@@ -20,17 +22,19 @@ public class BufferSorter : MonoBehaviour {
     private int cachedInstanceCount = -1;
 
     public const int count = 2048;
+    const int groupSize = 128;
+    int groupAmount = count / groupSize;
 
     const float size = 1f;
     [Range(0.001f, 1f)]
     public float speed = 1;
     public float angularSpeed = 0.5f;
     public float gravityMul = 1;
-    [Range(0.001f,1f)]
+    [Range(0.001f, 1f)]
     public float diameter = 0.05f;
-    public Vector3 gravityVec = new Vector3(0, -1,0);
+    public Vector3 gravityVec = new Vector3(0, -1, 0);
 
-   
+
     struct particle
     {
         public Vector3 position;
@@ -47,33 +51,47 @@ public class BufferSorter : MonoBehaviour {
         public int parentId;
         public int2 intNodes;
         public int2 leaves;
+        public int2 bLeaves;
         public Vector3 minPos;
         public Vector3 maxPos;
         public float sRadius;
         public int visited;
         public uint mortonId;
     };
-   
+
     int mainKernelHandler;
     int mortonKernelHandler;
     int treeConstructionKernelhandler;
     int boundingSphereKernelHandler;
     int sortingKernelHandler;
     int mergeKernelHandler;
+    int writeNodeDataKernelHandler;
     //int loadKernelHandler;
     public Mesh cubeMesh;
     public Material instanceMaterial;
+
+   
     // Use this for initialization
-    void Start () {
+    void Start()
+    {
+        //Initialize variables
+        computeShader.SetFloat("radius", diameter / 2);
+        computeShader.SetFloat("speed", speed);
+        computeShader.SetFloat("gravity", gravityMul);
+        computeShader.SetVector("gravityVec", gravityVec);
+        computeShader.SetFloat("angularSpeed", angularSpeed);
+        computeShader.SetFloat("DeltaTime", Time.deltaTime / integrationStep);
         //Setup buffers
-        int particleStructSize = (sizeof(float) * 3 * 3) + sizeof(uint) + sizeof(int) + sizeof(float);
-        int nodeStructSize = sizeof(int) * 8 + sizeof(float) * 7 + sizeof(uint);
+        int particleStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(particle));
+        int nodeStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(internalNode));
         leafNodeBuffer = new ComputeBuffer(count, nodeStructSize, ComputeBufferType.Default);
-        internalNodeBuffer = new ComputeBuffer(count -1, nodeStructSize, ComputeBufferType.Default);
+        boundingLeafNodeBuffer = new ComputeBuffer(count, nodeStructSize, ComputeBufferType.Default);
+        internalNodeBuffer = new ComputeBuffer(count - 1, nodeStructSize, ComputeBufferType.Default);
+        boundingInternalNodeBuffer = new ComputeBuffer(count - 1, nodeStructSize, ComputeBufferType.Default);
         inputcomputeBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
-        //sortcomputeBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
-        //mortonBuffer = new ComputeBuffer(count, sizeof(uint), ComputeBufferType.Default);
+        mergeOutputBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+        indexBuffer = new ComputeBuffer(count, sizeof(int), ComputeBufferType.Default);
         //Apply buffer for instanced mesh drawing 
         instanceMaterial.SetBuffer("positionBuffer", inputcomputeBuffer);
         uint numIndices = (cubeMesh != null) ? (uint)cubeMesh.GetIndexCount(0) : 0;
@@ -81,7 +99,7 @@ public class BufferSorter : MonoBehaviour {
         args[1] = (uint)count;
         argsBuffer.SetData(args);
         cachedInstanceCount = count;
-        
+
         //Generate Initial Particle Values
         particle[] points = GetParticlePoints();
         inputcomputeBuffer.SetData(points);
@@ -91,80 +109,153 @@ public class BufferSorter : MonoBehaviour {
         mortonKernelHandler = computeShader.FindKernel("CSSortMortonIDs");
         treeConstructionKernelhandler = computeShader.FindKernel("CSCreateBVH");
         boundingSphereKernelHandler = computeShader.FindKernel("CSGenerateBoundingSpheres");
-        //mergeKernelHandler = computeShader.FindKernel("CSMerge");
+        mergeKernelHandler = computeShader.FindKernel("Merge");
         sortingKernelHandler = sortShader.FindKernel("RadixSort");
+        writeNodeDataKernelHandler = computeShader.FindKernel("WriteNodeData");
         //Create MortonIDs
         computeShader.SetBuffer(mortonKernelHandler, "inputPoints", inputcomputeBuffer);
-        computeShader.Dispatch(mortonKernelHandler, count / 32, 1, 1);
+        computeShader.Dispatch(mortonKernelHandler, count / groupSize, 1, 1);
         Debug.Log("Dispatched morton kernel");
         ////Sort IDs
-        sortShader.SetInt("count", count);
         sortShader.SetBuffer(sortingKernelHandler, "Data", inputcomputeBuffer);
-        sortShader.Dispatch(sortingKernelHandler, count / 512, 1, 1);
-        Debug.Log("Dispatched sorting kernel");
-        
+        sortShader.Dispatch(sortingKernelHandler, count / groupSize, 1, 1);
+
         particle[] data = new particle[count];
         inputcomputeBuffer.GetData(data);
-        //Print("Sorted Data", data, true);
-        
-        ////Create Tree
-        computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", inputcomputeBuffer);
+        Print("Sorted Data", data, true);
+        computeShader.SetBuffer(mergeKernelHandler, "inputPoints", inputcomputeBuffer);
+        computeShader.SetBuffer(mergeKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
+        computeShader.Dispatch(mergeKernelHandler, count / groupSize, 1, 1);
+        //}
+
+        Debug.Log("Dispatched sorting kernel");
+
+        data = new particle[count];
+        mergeOutputBuffer.GetData(data);
+        Print("Sorted Data", data, true);
+
+        computeShader.SetBuffer(writeNodeDataKernelHandler, "internalNodes", internalNodeBuffer);
+        computeShader.SetBuffer(writeNodeDataKernelHandler, "leafNodes", leafNodeBuffer);
+        computeShader.SetBuffer(writeNodeDataKernelHandler, "boundingInternalNodes", boundingInternalNodeBuffer);
+        computeShader.SetBuffer(writeNodeDataKernelHandler, "boundingLeafNodes", boundingLeafNodeBuffer);
+        computeShader.SetBuffer(writeNodeDataKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
+        computeShader.Dispatch(writeNodeDataKernelHandler, count / groupSize, 1, 1);
+        //Create Tree
+        computeShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", mergeOutputBuffer);
         computeShader.SetBuffer(treeConstructionKernelhandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(treeConstructionKernelhandler, "leafNodes", leafNodeBuffer);
-        computeShader.Dispatch(treeConstructionKernelhandler, count / 32, 1, 1);
+        computeShader.SetBuffer(treeConstructionKernelhandler, "boundingInternalNodes", boundingInternalNodeBuffer);
+        computeShader.SetBuffer(treeConstructionKernelhandler, "boundingLeafNodes", boundingLeafNodeBuffer);
+        computeShader.SetBuffer(treeConstructionKernelhandler, "mergeOutputBuffer", mergeOutputBuffer);
+        computeShader.SetBuffer(treeConstructionKernelhandler, "indexBuffer", indexBuffer);
+        
+        computeShader.Dispatch(treeConstructionKernelhandler, count / groupSize, 1, 1);
+        
         Debug.Log("Dispatched tree contruction kernel");
-        
-        internalNode[] nodeData = new internalNode[count];
-        internalNodeBuffer.GetData(nodeData);
+
+        boundingInternalNodeBuffer.GetData(nodeData);
         Print("Node Data", nodeData, false);
-        
-        leafNodeBuffer.GetData(nodeData);
-        Print("Leaf Data", nodeData, true);
+        //internalNode[] nodeData = new internalNode[count];
+
+        boundingLeafNodeBuffer.GetData(nodeData);
+        Print("Leaf Data", nodeData, false);
 
         //Create bounding sphere
-        computeShader.SetBuffer(boundingSphereKernelHandler, "inputPoints", inputcomputeBuffer);
         computeShader.SetBuffer(boundingSphereKernelHandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(boundingSphereKernelHandler, "leafNodes", leafNodeBuffer);
-        computeShader.Dispatch(boundingSphereKernelHandler, count / 32, 1, 1);
-        Debug.Log("Dispatched bounding calculation kernel");
-        
-        
+        computeShader.SetBuffer(boundingSphereKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
+        computeShader.SetBuffer(boundingSphereKernelHandler, "boundingInternalNodes", boundingInternalNodeBuffer);
+        computeShader.SetBuffer(boundingSphereKernelHandler, "boundingLeafNodes", boundingLeafNodeBuffer);
+        //computeShader.Dispatch(boundingSphereKernelHandler, count / groupSize, 1, 1);
+        //Debug.Log("Dispatched bounding calculation kernel");
+
+        //internalNodeBuffer.GetData(nodeData);
+        //Print("Node Data", nodeData, false);
+
         //Apply Movement
         computeShader.SetBuffer(mainKernelHandler, "internalNodes", internalNodeBuffer);
         computeShader.SetBuffer(mainKernelHandler, "leafNodes", leafNodeBuffer);
+        computeShader.SetBuffer(mainKernelHandler, "boundingInternalNodes", boundingInternalNodeBuffer);
+        computeShader.SetBuffer(mainKernelHandler, "boundingLeafNodes", boundingLeafNodeBuffer);
+        computeShader.SetBuffer(mainKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
         computeShader.SetBuffer(mainKernelHandler, "inputPoints", inputcomputeBuffer);
-        computeShader.Dispatch(mainKernelHandler, count / 256, 1, 1);
+
+        computeShader.Dispatch(mainKernelHandler, count / groupSize, 1, 1);
         Debug.Log("Dispatched physics kernel");
+
+       
+
+        //cm = new CommandBuffer();
+        //cm.DispatchCompute(sortShader, sortingKernelHandler, count / 128, 1, 1);
+        //cm.DispatchCompute(sortShader, mergeKernelHandler, count / 128, 1, 1);
+        //cm.DispatchCompute(computeShader, treeConstructionKernelhandler, count / groupSize, 1, 1);
+        //cm.DispatchCompute(computeShader, boundingSphereKernelHandler, count / groupSize, 1, 1);
+        //cm.DispatchCompute(computeShader, mainKernelHandler, count / groupSize, 1, 1);
+        //cm.DrawMeshInstancedIndirect(cubeMesh, 0, instanceMaterial, 0, argsBuffer);
+        //Camera.main.AddCommandBuffer(CameraEvent.BeforeDepthNormalsTexture, cm);
+        //internalNodeBuffer.GetData(nodeData);
+        //Print("Node Data", nodeData, false);
+        //leafNodeBuffer.GetData(leafData);
+        //indexBuffer.GetData(indexData);
+        //Print("Index Data", indexData);
+        //Print("Leaf Data", leafData, true);
+        //swap = false;
     }
 
     // Update is called once per frame
-    void Update () {
+    void Update()
+    {
+        //computeShader.SetFloat("radius", diameter / 2);
+        //computeShader.SetFloat("speed", speed);
+        //computeShader.SetFloat("gravity", gravityMul);
+        //computeShader.SetVector("gravityVec", gravityVec);
+        //computeShader.SetFloat("angularSpeed", angularSpeed);
+        //computeShader.SetFloat("DeltaTime", Time.deltaTime / integrationStep);
+        //Graphics.ExecuteCommandBufferAsync(cm,ComputeQueueType.Default);
         DispatchShaders();
         Graphics.DrawMeshInstancedIndirect(cubeMesh, 0, instanceMaterial, new Bounds(Vector3.zero, new Vector3(0.1f, 0.1f, 0.1f)), argsBuffer);
     }
 
-    private void FixedUpdate()
-    {
-    }
 
-    internalNode[] nodeData = new internalNode[count];
+
+    internalNode[] nodeData = new internalNode[count-1];
     internalNode[] leafData = new internalNode[count];
     particle[] particleData = new particle[count];
+    int[] indexData = new int[count];
 
-    bool swap = true;
+    public bool swap = false;
+    int integrationStep = 8;
     void DispatchShaders()
     {
-        computeShader.SetFloat("speed", speed);
-        computeShader.SetFloat("gravity", gravityMul);
-        computeShader.SetVector("gravityVec", gravityVec);
-        computeShader.SetFloat("angularSpeed", angularSpeed);
-        computeShader.SetFloat("DeltaTime", Time.deltaTime);
-        computeShader.SetFloat("radius", diameter / 2);
-        sortShader.Dispatch(sortingKernelHandler, count / 512, 1, 1);
-        computeShader.Dispatch(treeConstructionKernelhandler, count / 32, 1, 1);
-        computeShader.Dispatch(boundingSphereKernelHandler, count / 32, 1, 1);
-        computeShader.Dispatch(mainKernelHandler, count / 256, 1, 1);
+      
+    
 
+        for (int i = 0; i < integrationStep; i++)
+        {
+            computeShader.SetFloat("radius", diameter / 2);
+            computeShader.SetFloat("speed", speed);
+            computeShader.SetFloat("gravity", gravityMul);
+            computeShader.SetVector("gravityVec", gravityVec);
+            computeShader.SetFloat("angularSpeed", angularSpeed);
+            computeShader.SetFloat("DeltaTime", Time.deltaTime / integrationStep);
+            sortShader.Dispatch(sortingKernelHandler, count / groupSize, 1, 1);
+            computeShader.Dispatch(mergeKernelHandler, count / groupSize, 1, 1);
+            computeShader.Dispatch(writeNodeDataKernelHandler, count / groupSize, 1, 1);
+            computeShader.Dispatch(treeConstructionKernelhandler, count / groupSize, 1, 1);
+            //computeShader.Dispatch(boundingSphereKernelHandler, count / groupSize, 1, 1);
+            computeShader.Dispatch(mainKernelHandler, count / groupSize, 1, 1);
+        }
+
+        if (swap)
+        {
+            internalNodeBuffer.GetData(nodeData);
+            Print("Node Data", nodeData, false);
+            boundingLeafNodeBuffer.GetData(leafData);
+            indexBuffer.GetData(indexData);
+            Print("Index Data", indexData);
+            Print("Leaf Data", leafData, true);
+            swap = false;
+        }
     }
 
     public float GizmoPosScale = 1;
@@ -183,9 +274,7 @@ public class BufferSorter : MonoBehaviour {
     [Range(0, count - 1)]
     public int heirarchyLeaf = 0;
 
-
-    
-
+    public bool visualizeBVHTree = false;
 
     void OnDrawGizmos()
     {
@@ -195,13 +284,19 @@ public class BufferSorter : MonoBehaviour {
             VisualizeBoundingBoxes();
         else if (visualizePotentialCollisions)
             VisualisePotentialCollisions();
+
+        if (visualizeBVHTree)
+        {
+            VisualizeBVHTree();
+            //swap = false;
+        }
     }
 
     void VisualiseBoundingHeirarchy()
     {
-        leafNodeBuffer.GetData(leafData);
-        internalNodeBuffer.GetData(nodeData);
-        inputcomputeBuffer.GetData(particleData);
+        boundingLeafNodeBuffer.GetData(leafData);
+        boundingInternalNodeBuffer.GetData(nodeData);
+        mergeOutputBuffer.GetData(particleData);
         int[] collisions;
         TraverseBVHIterative(leafData[heirarchyLeaf], diameter / 2, out collisions);
         Gizmos.color = Color.yellow;
@@ -211,7 +306,7 @@ public class BufferSorter : MonoBehaviour {
         for (int i = 0; i < collisions.Length; i++)
         {
             int col = collisions[i];
-            if(col != -1)
+            if (col != -1)
             {
                 Gizmos.DrawLine(leafPos * GizmoPosScale, particleData[leafData[col].objectId].position * GizmoPosScale);
                 Gizmos.DrawWireSphere(particleData[leafData[col].objectId].position * GizmoPosScale, (diameter / 2) * GizmoScale);
@@ -223,12 +318,23 @@ public class BufferSorter : MonoBehaviour {
 
     void VisualisePotentialCollisions()
     {
-        leafNodeBuffer.GetData(leafData);
-        internalNodeBuffer.GetData(nodeData);
-        inputcomputeBuffer.GetData(particleData);
+        boundingLeafNodeBuffer.GetData(leafData);
+        boundingInternalNodeBuffer.GetData(nodeData);
+        mergeOutputBuffer.GetData(particleData);
         int[] collisions;
-        TraverseBVHIterative(leafData[heirarchyLeafToCheckForCollision], diameter / 2, out collisions);
-        Vector3 leafPos = particleData[leafData[heirarchyLeafToCheckForCollision].objectId].position;
+        int leaf = 0;
+        for (int i = 0; i < leafData.Length; i++)
+        {
+            if(leafData[i].objectId == heirarchyLeafToCheckForCollision)
+            {
+                leaf = i;
+            }
+        }
+
+        
+
+        TraverseBVHIterative(leafData[leaf], diameter / 2, out collisions);
+        Vector3 leafPos = particleData[leafData[leaf].objectId].position;
 
         for (int i = 0; i < collisions.Length; i++)
         {
@@ -239,13 +345,14 @@ public class BufferSorter : MonoBehaviour {
                 Gizmos.DrawWireSphere(particleData[col].position * GizmoPosScale, (diameter / 2) * GizmoScale);
             }
         }
+
+
     }
 
-   
+
     void VisualizeBoundingBoxes()
     {
-        int recursionCount = boundingBoxInt;
-        internalNodeBuffer.GetData(nodeData);
+        boundingInternalNodeBuffer.GetData(nodeData);
 
         for (int i = boundingBoxMin; i < nodeData.Length; i++)
         {
@@ -256,6 +363,38 @@ public class BufferSorter : MonoBehaviour {
             Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
         }
     }
+
+    void DrawTreeRecursive(internalNode root, Vector3 origin, float scale)
+    {
+        internalNode ChildA;
+        internalNode ChildB;
+
+        GetNodeChildren(root,out ChildA, out ChildB);
+        Debug.DrawLine(origin, origin + new Vector3(-2 * scale, -1, 2) );
+        Debug.DrawLine(origin, origin + new Vector3(2 * scale, -1, -2));
+        DrawNode(ChildA, origin + new Vector3(-2 * scale, -1, 2));
+        DrawNode(ChildB, origin + new Vector3(2 * scale, -1, -2));
+
+        if (!isLeaf(ChildA))
+            DrawTreeRecursive(ChildA, origin + new Vector3(-2 * scale, -1, 2), scale * treeScale);
+        if (!isLeaf(ChildB))
+            DrawTreeRecursive(ChildB, origin + new Vector3(2 * scale, -1, -2) , scale * treeScale);
+    }
+
+    void DrawNode(internalNode node, Vector3 pos)
+    {
+        Gizmos.DrawSphere(pos, 0.5f);
+    }
+
+    [Range(0,2)]
+    public float treeScale = 0.55f;
+    void VisualizeBVHTree()
+    {
+        internalNode root = nodeData[0];
+        DrawNode(root, Vector3.zero);
+        DrawTreeRecursive(root, Vector3.zero, 2f * treeScale);
+    }
+
     void GetNodeChildren(internalNode node, out internalNode childA, out internalNode childB)
     {
         int2 leaves = node.leaves;
@@ -280,15 +419,15 @@ public class BufferSorter : MonoBehaviour {
     void TraverseBVHIterative(internalNode leaf, float radius, out int[] collisionList)
     {
         internalNode node = nodeData[0];
-        int[] stack = new int[32];
-        collisionList = new int[32];
+        int[] stack = new int[64];
+        collisionList = new int[64];
         for (uint i = 0; i < 32; i++)
         {
             stack[i] = -2;
             collisionList[i] = -1;
         }
 
-        
+
         int traversalCount = 0;
         int collisionCount = 0;
         int maxLoop = 0;
@@ -296,26 +435,26 @@ public class BufferSorter : MonoBehaviour {
         Vector3 AABBRadius = new Vector3(radius, radius, radius) * angularSpeed;
         Vector3 scale = AABBRadius;// new Vector3(leaf.maxPos.x - leaf.minPos.x, leaf.maxPos.y - leaf.minPos.y, leaf.maxPos.z - leaf.minPos.z);
         Gizmos.DrawWireCube(((leaf.minPos + leaf.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
-    
+
         do
         {
             internalNode childA;
             internalNode childB;
-            GetNodeChildren(node, out childA,out childB);
+            GetNodeChildren(node, out childA, out childB);
 
             AABBRadius = new Vector3(radius, radius, radius) * angularSpeed;
-            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos, childA.maxPos)&& childA.nodeId != -1;
-            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos, childB.maxPos)&& childB.nodeId != -1;
+            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos, childA.maxPos) && childA.nodeId != -1;
+            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos, childB.maxPos) && childB.nodeId != -1;
 
             //Gizmos.color = Color.blue;
             //Gizmos.DrawLine(childA.minPos * GizmoPosScale, childB.minPos * GizmoPosScale);
             //
-            if(overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)
+            if (overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)
             {
                 Gizmos.color = Color.blue;
                 scale = new Vector3(childA.maxPos.x - childA.minPos.x, childA.maxPos.y - childA.minPos.y, childA.maxPos.z - childA.minPos.z);
-                Gizmos.DrawWireCube(((childA.minPos + childA.maxPos) / 2) * GizmoPosScale, AABBRadius * GizmoScale );
-            
+                Gizmos.DrawWireCube(((childA.minPos + childA.maxPos) / 2) * GizmoPosScale, AABBRadius * GizmoScale);
+
             }
             if (overlapB && isLeaf(childB) && childA.objectId != leaf.objectId)
             {
@@ -376,6 +515,8 @@ public class BufferSorter : MonoBehaviour {
         } while (stack[traversalCount] != -1 && maxLoop < 64);//traversing && traversalCount < 64);
 
     }
+
+
     bool AABBOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
     {
         return (minA.x <= maxB.x && maxA.x >= minB.x) &&
@@ -393,7 +534,7 @@ public class BufferSorter : MonoBehaviour {
     Vector3[] GetVectorPoints()
     {
         Vector3[] points = new Vector3[count];
-        Random.seed = 0;
+        Random.InitState(0);
 
         for (int i = 0; i < count; i++)
         {
@@ -406,12 +547,12 @@ public class BufferSorter : MonoBehaviour {
     particle[] GetParticlePoints()
     {
         particle[] points = new particle[count];
-        Random.seed = 1422347532;
+        Random.InitState(1422347532);
 
         for (int i = 0; i < count; i++)
         {
             points[i].position = new Vector3(Random.Range(0, size), Random.Range(0, size), Random.Range(0, size));
-            points[i].direction = new Vector3(Random.Range(-size, size), Random.Range(-size, size), Random.Range(-size, size));
+            points[i].direction = Vector3.zero;// new Vector3(Random.Range(-size, size), Random.Range(-size, size), Random.Range(-size, size));
             points[i].color = new Vector3(Random.Range(0, size), Random.Range(0, size), Random.Range(0, size));
         }
         return points;
@@ -421,6 +562,10 @@ public class BufferSorter : MonoBehaviour {
         inputcomputeBuffer.Release();
         internalNodeBuffer.Release();
         leafNodeBuffer.Release();
+        indexBuffer.Release();
+        boundingLeafNodeBuffer.Release();
+        boundingInternalNodeBuffer.Release();
+        mergeOutputBuffer.Release();
         if (argsBuffer != null)
             argsBuffer.Release();
         argsBuffer = null;
@@ -466,10 +611,10 @@ public class BufferSorter : MonoBehaviour {
         {
             if ((i != 0) && (array[i - 1].morton > array[i].morton))
                 problems += "Discontinuity found at " + i + "!! \n";
-            if(divided)
-            values += (int)array[i].morton / 10000000 + " ";
+            if (divided)
+                values += (int)array[i].morton / 10000000 + " ";
             else
-            values += (int)array[i].morton / 1000 + " ";
+                values += (int)array[i].morton / 1000 + " ";
         }
 
         Debug.Log(name + " :  " + values + "\n" + problems);
@@ -482,11 +627,16 @@ public class BufferSorter : MonoBehaviour {
         for (int i = 0; i < array.Length; i++)
         {
             if ((i != 0) && (array[i - 1].mortonId > array[i].mortonId))
-                problems += "Discontinuity found at " + i + "!! \n";
+                problems += "Discontinuity found at " + i + "!! for values " + array[i - 2].mortonId + "," + array[i - 1].mortonId + "," + array[i].objectId + "\n";// + "," + array[i + 1].mortonId + "\n";
             if (leaf)
+            {
                 values += (int)array[i].mortonId / 10000000 + " ";
+            }
             else
-                values += (int)array[i].mortonId / 1000 + " ";
+            {
+                values += array[i].parentId + " Visited> " + array[i].visited + " Leaves>(" + array[i].leaves.x + "," + array[i].leaves.y + ")  " + " bLeaves>(" + array[i].bLeaves.x + "," + array[i].bLeaves.y + ")  " + " Nodes>(" + array[i].intNodes.x + ":" + array[i].intNodes.y + ") MaxPos ->" + array[i].maxPos.ToString() + "\n";
+            }
+            //values += array[i].parentId + " Visited> " + array[i].visited + " Leaves>(" + array[i].leaves.x + "," + array[i].leaves.y + ")  " + " bLeaves>(" + array[i].bLeaves.x + "," + array[i].bLeaves.y + ")  " + " Nodes>(" + array[i].intNodes.x + ":" + array[i].intNodes.y + ") MaxPos ->" + array[i].maxPos.ToString() + "\n";
 
             //if ((i != 0) && (array[i - 1].morton > array[i].morton))
             //    problems += "Discontinuity found at " + i + "!! \n";
@@ -494,80 +644,11 @@ public class BufferSorter : MonoBehaviour {
             //if (leaf)
             //values += array[i].parentId + ", "+ array[i].objectId + " , Morton ->" + array[i].mortonId +"\n";
             //else
-            //values += array[i].parentId + " Leaves>(" + array[i].leaves.x + "," + array[i].leaves.y + ")  " + " Nodes>(" + array[i].intNodes.x + ":" + array[i].intNodes.y + ") Morton ->" + array[i].mortonId + "\n";
+            //
 
         }
 
         Debug.Log(name + " : \n" + values + "\n" + problems);
     }
 
-    // Inverse of Part1By1 - "delete" all odd-indexed bits
-    uint Compact1By1(uint x)
-    {
-        x &= 0x55555555;                  // x = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
-        x = (x ^ (x >> 1)) & 0x33333333; // x = --fe --dc --ba --98 --76 --54 --32 --10
-        x = (x ^ (x >> 2)) & 0x0f0f0f0f; // x = ---- fedc ---- ba98 ---- 7654 ---- 3210
-        x = (x ^ (x >> 4)) & 0x00ff00ff; // x = ---- ---- fedc ba98 ---- ---- 7654 3210
-        x = (x ^ (x >> 8)) & 0x0000ffff; // x = ---- ---- ---- ---- fedc ba98 7654 3210
-        return x;
-    }
-
-    // Inverse of Part1By2 - "delete" all bits not at positions divisible by 3
-    uint Compact1By2(uint x)
-    {
-        x &= 0x09249249;                  // x = ---- 9--8 --7- -6-- 5--4 --3- -2-- 1--0
-        x = (x ^ (x >> 2)) & 0x030c30c3; // x = ---- --98 ---- 76-- --54 ---- 32-- --10
-        x = (x ^ (x >> 4)) & 0x0300f00f; // x = ---- --98 ---- ---- 7654 ---- ---- 3210
-        x = (x ^ (x >> 8)) & 0xff0000ff; // x = ---- --98 ---- ---- ---- ---- 7654 3210
-        x = (x ^ (x >> 16)) & 0x000003ff; // x = ---- ---- ---- ---- ---- --98 7654 3210
-        return x;
-    }
-
-    uint DecodeMorton3X(uint code)
-    {
-        return Compact1By2(code >> 0);
-    }
-
-    uint DecodeMorton3Y(uint code)
-    {
-        return Compact1By2(code >> 1);
-    }
-
-    uint DecodeMorton3Z(uint code)
-    {
-        return Compact1By2(code >> 2);
-    }
-
-    Vector3 DecodeMortornToVector(uint code)
-    {
-        uint x = DecodeMorton3X(code);
-        uint y = DecodeMorton3Y(code);
-        uint z = DecodeMorton3Z(code);
-        return new Vector3(x, y, z);
-    }
-
-
-    // Expands a 10-bit integer into 30 bits
-    // by inserting 2 zeros after each bit.
-    uint expandBits(uint v)
-    {
-        v = (v * 0x00010001u) & 0xFF0000FFu;
-        v = (v * 0x00000101u) & 0x0F00F00Fu;
-        v = (v * 0x00000011u) & 0xC30C30C3u;
-        v = (v * 0x00000005u) & 0x49249249u;
-        return v;
-    }
-
-    // Calculates a 30-bit Morton code for the
-    // given 3D point located within the unit cube [0,1].
-    uint Morton3D(float x, float y, float z)
-    {
-        x = Mathf.Min(Mathf.Max(x * 1024.0f, 0.0f), 1023.0f);
-        y = Mathf.Min(Mathf.Max(y * 1024.0f, 0.0f), 1023.0f);
-        z = Mathf.Min(Mathf.Max(z * 1024.0f, 0.0f), 1023.0f);
-        uint xx = expandBits((uint)x);
-        uint yy = expandBits((uint)y);
-        uint zz = expandBits((uint)z);
-        return xx * 4 + yy * 2 + zz;
-    }
 }

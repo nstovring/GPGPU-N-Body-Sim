@@ -12,14 +12,16 @@ public class PivotController : MonoBehaviour {
 	
 	// Update is called once per frame
 	void Update () {
-        float yRot = Input.mousePosition.x;
-        float xRot = Input.mousePosition.y;
-        Quaternion rotation = Quaternion.identity;
-        rotation.eulerAngles = new Vector3(xRot, yRot, 0) * 0.5f;
-        transform.rotation = rotation;
+        if (Input.GetMouseButton(0))
+        {
+            float yRot = Input.mousePosition.x;
+            float xRot = Input.mousePosition.y;
+            Quaternion rotation = Quaternion.identity;
+            rotation.eulerAngles = new Vector3(xRot, yRot, 0) * 0.5f;
+            transform.rotation = rotation;
 
-        if (child != null)
-            child.localPosition += new Vector3(0,0,Input.mouseScrollDelta.y);
-
+            if (child != null)
+                child.localPosition += Vector3.Lerp(child.localPosition, new Vector3(0, 0, Input.mouseScrollDelta.y), 0.1f);
+        }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class ClothSimulator : MonoBehaviour {
 
@@ -11,24 +12,34 @@ public class ClothSimulator : MonoBehaviour {
 
     ComputeBuffer particleBuffer;
     ComputeBuffer springBuffer;
-    ComputeBuffer testParticleBuffer;
+    ComputeBuffer initialPosBuffer;
+    ComputeBuffer vertexBuffer;
+
+    public Material clothMaterial;
 
     int springCount;
-    public float stiffness;
+    //[Range(1,50)]
+    public float globalStiffness;
     [Range(0,1)]
     public float damping;
-    [Range(1,4)]
+    [Range(1f,1000)]
     public float mass;
+    public float gravityMul = 1f;
     public Transform clothHandler;
+    public Transform sphereCollider;
 
     [System.Serializable]
     public class SpringVariables
     {
-        [Range(0,1)]
         public float damping = 0.5f;
-        [Range(1, 100)]
         public float stiffness = 7;
     }
+
+    struct clothVertex
+    {
+        public Vector3 vertex;
+        public int index;
+    };
 
     [SerializeField]
     public SpringVariables structuralSpringVars;
@@ -36,49 +47,24 @@ public class ClothSimulator : MonoBehaviour {
     public SpringVariables structuralBendingSpringVars;
     public SpringVariables shearBendingSpringVars;
 
-    public struct testParticle
-    {
-        public Vector3 position;
-        public Vector3 velocity;
-        public float mass;
-        public int isFixed;
-        public int iD;
-        public int[] springs;
-    };
 
     // Use this for initialization
     void Start () {
         mainClothKernelHandler = clothComputeShader.FindKernel("CSMain");
         springKernelHandler = clothComputeShader.FindKernel("CSSprings");
-        testParticle tP = new testParticle();
-        //tP.springs = new int[16];
-        int testSize = sizeof(float) * 7 + sizeof(int) * 18;
-        Debug.Log(testSize);
         int particleStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(SpringHandler.particle));
-        Debug.Log(particleStructSize);
+        ///Debug.Log(particleStructSize);
         int springStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(SpringHandler.spring));
-
-        testParticle[] testParticles = new testParticle[count];
-        testParticleBuffer = new ComputeBuffer(count, testSize, ComputeBufferType.Default);
-        for (int i = 0; i < testParticles.Length; i++)
-        {
-            testParticles[i].springs = new int[16];
-            for (int j = 0; j < 16; j++)
-            {
-                testParticles[i].springs[j] = j;
-            }
-        }
-
-        testParticleBuffer.SetData(testParticles);
-
-        clothComputeShader.SetBuffer(mainClothKernelHandler, "testParticles", testParticleBuffer);
-        testParticleBuffer.GetData(testParticles);
-        Print("TestParticle Connections", testParticles);
+        int clothVertexStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(clothVertex));
 
         SpringHandler.particle[] particles = new SpringHandler.particle[count];
         List<SpringHandler.spring> springs = new List<SpringHandler.spring>();
 
+        Vector3[] initialPositions = new Vector3[count];
         int rows = (int) Mathf.Sqrt(count);
+        int collumns = (int)Mathf.Sqrt(count);
+
+        //Debug.Log(rows +"," + collumns);
 
         for (int i = 0; i < particles.Length; i++)
         {
@@ -100,37 +86,49 @@ public class ClothSimulator : MonoBehaviour {
             particles[i].shearBendingSprings.w = -1;
         }
 
-        for (int x = 0; x < rows; x++)
+        for (int x = 0; x < collumns; x++)
         {
             for (int y = 0; y < rows; y++)
             {
-                particles[y + x * rows].mass = 1;
+                particles[y + x * rows].mass = mass / count;
                 particles[y + x * rows].iD = y + x * rows;
-                particles[y + x * rows].position = new Vector3(x/ 512f, y/ 512f, 0);
+                particles[y + x * rows].position = transform.TransformPoint(new Vector3(x/ (float)rows, 0, y/ (float)collumns));
                 particles[y + x * rows].isFixed = 0;
-
+                initialPositions[y + x * rows] = transform.position + transform.InverseTransformPoint(new Vector3(x / (float)rows, 0, y / (float)collumns));
                 AddSprings(x, y, rows, particles,ref springs);
             }
         }
-        particles[0].isFixed = 1;
-        particles[(rows * (rows -1))].isFixed = 1;
 
-        //Print("Links", particles);
+        for (int i = 0; i < (collumns * rows); i+= rows)
+        {
+            particles[i].isFixed = 1;
+        }
+
 
         particleBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
         springBuffer = new ComputeBuffer(springs.Count, springStructSize, ComputeBufferType.Default);
+        initialPosBuffer = new ComputeBuffer(count, sizeof(float) * 3, ComputeBufferType.Default);
+        vertexBuffer = new ComputeBuffer(count * 3, clothVertexStructSize, ComputeBufferType.Default);
 
         springCount = springs.Count;
-
+        initialPosBuffer.SetData(initialPositions);
         particleBuffer.SetData(particles);
         springBuffer.SetData(springs.ToArray());
 
+
+        clothComputeShader.SetBuffer(mainClothKernelHandler, "initialPositions", initialPosBuffer);
         clothComputeShader.SetBuffer(mainClothKernelHandler, "particles", particleBuffer);
         clothComputeShader.SetBuffer(mainClothKernelHandler, "springs", springBuffer);
-        clothComputeShader.SetBuffer(springKernelHandler, "particles", particleBuffer);
-        clothComputeShader.SetBuffer(springKernelHandler, "springs", springBuffer);
+        clothComputeShader.SetBuffer(mainClothKernelHandler, "vertexBuffer", vertexBuffer);
+        clothMaterial.SetBuffer("vertexBuffer", particleBuffer);
+        clothMaterial.SetFloat("count", count);
 
+        CommandBuffer cm = new CommandBuffer();
+        cm.DrawProcedural(Matrix4x4.identity, clothMaterial, -1, MeshTopology.Points, count);
+        Camera.main.AddCommandBuffer(CameraEvent.AfterSkybox, cm);
     }
+
+
 
     void AddSprings(int x, int y, int rows, SpringHandler.particle[] particles,ref List<SpringHandler.spring> springs)
     {
@@ -138,15 +136,15 @@ public class ClothSimulator : MonoBehaviour {
         {
             particles[y + x * rows].structuralSprings.x = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows,out connectedParticleIndex, 0,1, structuralSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows,out connectedParticleIndex, 0,1, structuralSpringVars, SpringHandler.SpringType.StructuralSpring));
             particles[connectedParticleIndex].structuralSprings.w = springs.Count-1;
         }
 
-        if (x < rows - 1)
+        if (x < rows -1)
         {
             particles[y + x * rows].structuralSprings.y = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows,out connectedParticleIndex, 1, 0, structuralSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows,out connectedParticleIndex, 1, 0, structuralSpringVars, SpringHandler.SpringType.StructuralSpring));
             particles[connectedParticleIndex].structuralSprings.z = springs.Count-1;
         }
 
@@ -154,7 +152,7 @@ public class ClothSimulator : MonoBehaviour {
         {
             particles[y + x * rows].shearSprings.x = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 1, 1, shearSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 1, 1, shearSpringVars, SpringHandler.SpringType.ShearSpring));
             particles[connectedParticleIndex].shearSprings.z = springs.Count - 1;
         }
         
@@ -162,33 +160,33 @@ public class ClothSimulator : MonoBehaviour {
         {
             particles[y + x * rows].shearSprings.y = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, -1, 1, shearSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, -1, 1, shearSpringVars, SpringHandler.SpringType.ShearSpring));
             particles[connectedParticleIndex].shearSprings.w = springs.Count - 1;
         }
-
+        
         //Get shearBendingSprings
-        if (y > 1 && x < rows - 2)
+        if (y < rows - 2 && x < rows - 2)
         {
             particles[y + x * rows].shearBendingSprings.x = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 2, -2,shearBendingSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex,2, 2,shearBendingSpringVars, SpringHandler.SpringType.ShearBendingSpring));
             particles[connectedParticleIndex].shearBendingSprings.z = springs.Count - 1;
         }
         
-        if (y < rows - 2 && x < rows - 2)
+        if (y < rows - 2 && x > 1)
         {
             particles[y + x * rows].shearBendingSprings.y = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 2, 2, shearBendingSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, -2, 2, shearBendingSpringVars, SpringHandler.SpringType.ShearBendingSpring));
             particles[connectedParticleIndex].shearBendingSprings.w = springs.Count - 1;
         }
-
+        
         //Get structutralBendingSprings
         if (y < rows - 2)
         {
             particles[y + x * rows].structutralBendingSprings.x = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 0, 2, structuralBendingSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 0, 2, structuralBendingSpringVars, SpringHandler.SpringType.StructuralBendingSpring));
             particles[connectedParticleIndex].structutralBendingSprings.z = springs.Count - 1;
         }
         
@@ -196,60 +194,69 @@ public class ClothSimulator : MonoBehaviour {
         {
             particles[y + x * rows].structutralBendingSprings.y = springs.Count;
             int connectedParticleIndex;
-            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 2, 0, structuralBendingSpringVars));
+            springs.Add(SpringHandler.GetSpring(x, y, rows, out connectedParticleIndex, 2, 0, structuralBendingSpringVars, SpringHandler.SpringType.StructuralBendingSpring));
             particles[connectedParticleIndex].structutralBendingSprings.w = springs.Count - 1;
         }
 
     }
- 
-    // Update is called once per frame
-   
 
-    bool IsValidSpring(int x)
+
+    void DrawConnections(SpringHandler.particle[] ps, SpringHandler.spring[] ss, int i)
     {
-        if (x != -1)
-            return true;
-        return false;
+        if (drawStructuralSprings)
+        {
+            SpringHandler.DrawStructuralSprings(ps, ss, i);
+        }
+        if (drawShearSprings)
+        {
+
+            SpringHandler.DrawShearSprings(ps, ss, i);
+
+        }
+        if (drawStructuralBendingSprings)
+        {
+            SpringHandler.DrawStructuralBendingSprings(ps, ss, i);
+
+        }
+        if (drawShearBendingSprings)
+        {
+            SpringHandler.DrawShearBendingSprings(ps, ss, i);
+        }
     }
 
-    void DrawSelectedParticle(SpringHandler.particle[] ps, SpringHandler.spring[] ss)
-    {
-        if (IsValidSpring(ps[selectedParticle].structuralSprings.x))
-            DrawSpring(ss[ps[selectedParticle].structuralSprings.x], ref ps);
+    int solverSteps = 32;
+    void Update () {
 
-        if (IsValidSpring(ps[selectedParticle].structuralSprings.y))
-            DrawSpring(ss[ps[selectedParticle].structuralSprings.y], ref ps);
-
-        if (ps[selectedParticle].structuralSprings.z != -1)
-            DrawSpring(ss[ps[selectedParticle].structuralSprings.z], ref ps);
-
-        if (ps[selectedParticle].structuralSprings.w != -1)
-            DrawSpring(ss[ps[selectedParticle].structuralSprings.w], ref ps);
-    }
-
-    void FixedUpdate () {
-
-        if(clothHandler != null)
+        if (clothHandler != null)
         {
             clothComputeShader.SetVector("fixedPos", clothHandler.transform.position);
         }
-        clothComputeShader.SetFloat("deltaTime", Time.fixedDeltaTime);
-        clothComputeShader.SetFloat("stiffness", stiffness);
+        clothComputeShader.SetFloat("stiffness", globalStiffness);
         clothComputeShader.SetFloat("damping", damping);
         clothComputeShader.SetFloat("mass", mass);
+        clothComputeShader.SetFloat("gravityMul", gravityMul);
+        clothComputeShader.SetVector("spherePos", sphereCollider.transform.position);
 
-        clothComputeShader.Dispatch(mainClothKernelHandler, count / 8, 1, 1);
+        for (int i = 0; i < solverSteps; i++)
+        {
+            clothComputeShader.SetFloat("deltaTime", Time.deltaTime/ solverSteps);
+            clothComputeShader.Dispatch(mainClothKernelHandler, count / 8, 1, 1);
+        }
 
         SpringHandler.particle[] ps = new SpringHandler.particle[count];
+
         SpringHandler.spring[] ss = new SpringHandler.spring[springCount];
+        
         particleBuffer.GetData(ps);
         springBuffer.GetData(ss);
 
-        //ApplyForce(ref ps, ss);
         if (drawCloth)
         {
             DrawAllConnections(ps, ss);
-            DrawVelocity(ps);
+        }
+        if (drawVelocities)
+        {
+            SpringHandler.DrawVelocity(ps);
         }
 
         if (printDebug)
@@ -258,11 +265,34 @@ public class ClothSimulator : MonoBehaviour {
             printDebug = false;
         }
 
+        for (int i = 0; i < ss.Length; i++)
+        {
+            SpringHandler.spring s = ss[i];
+            switch((SpringHandler.SpringType)s.springType)
+            {
+                case (SpringHandler.SpringType.StructuralSpring):
+                    s = SpringHandler.ApplyChanges(s, structuralSpringVars);
+                    break;
+                case (SpringHandler.SpringType.ShearSpring):
+                    s = SpringHandler.ApplyChanges(s, shearSpringVars);
+                    break;
+                case (SpringHandler.SpringType.StructuralBendingSpring):
+                    s = SpringHandler.ApplyChanges(s, structuralBendingSpringVars);
+                    break;
+                case (SpringHandler.SpringType.ShearBendingSpring):
+                    s = SpringHandler.ApplyChanges(s, shearBendingSpringVars);
+                    break;
+            }
+            ss[i] = s;
+        }
+
         particleBuffer.SetData(ps);
+        springBuffer.SetData(ss);
 
     }
     public bool printDebug = false;
     public bool drawCloth = true;
+    public bool drawVelocities = true;
     public bool drawStructuralSprings = false;
     public bool drawShearSprings = false;
     public bool drawStructuralBendingSprings = false;
@@ -341,88 +371,6 @@ public class ClothSimulator : MonoBehaviour {
         }
     }
 
-    void DrawConnections(SpringHandler.particle[] ps, SpringHandler.spring[] ss, int i)
-    {
-        if (drawStructuralSprings)
-        {
-            if (IsValidSpring(ps[i].structuralSprings.x))
-                DrawSpring(ss[ps[i].structuralSprings.x], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structuralSprings.y))
-                DrawSpring(ss[ps[i].structuralSprings.y], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structuralSprings.z))
-                DrawSpring(ss[ps[i].structuralSprings.z], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structuralSprings.w))
-                DrawSpring(ss[ps[i].structuralSprings.w], ref ps, Color.blue);
-        }
-
-        if (drawShearSprings)
-        {
-
-            if (IsValidSpring(ps[i].shearSprings.x))
-                DrawSpring(ss[ps[i].shearSprings.x], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearSprings.y))
-                DrawSpring(ss[ps[i].shearSprings.y], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearSprings.z))
-                DrawSpring(ss[ps[i].shearSprings.z], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearSprings.w))
-                DrawSpring(ss[ps[i].shearSprings.w], ref ps, Color.green);
-        }
-
-        if (drawStructuralBendingSprings)
-        {
-            if (IsValidSpring(ps[i].structutralBendingSprings.x))
-                DrawSpring(ss[ps[i].structutralBendingSprings.x], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structutralBendingSprings.y))
-                DrawSpring(ss[ps[i].structutralBendingSprings.y], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structutralBendingSprings.z))
-                DrawSpring(ss[ps[i].structutralBendingSprings.z], ref ps, Color.blue);
-
-            if (IsValidSpring(ps[i].structutralBendingSprings.w))
-                DrawSpring(ss[ps[i].structutralBendingSprings.w], ref ps, Color.blue);
-        }
-
-        if (drawShearBendingSprings)
-        {
-            if (IsValidSpring(ps[i].shearBendingSprings.x))
-                DrawSpring(ss[ps[i].shearBendingSprings.x], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearBendingSprings.y))
-                DrawSpring(ss[ps[i].shearBendingSprings.y], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearBendingSprings.z))
-                DrawSpring(ss[ps[i].shearBendingSprings.z], ref ps, Color.green);
-
-            if (IsValidSpring(ps[i].shearBendingSprings.w))
-                DrawSpring(ss[ps[i].shearBendingSprings.w], ref ps, Color.green);
-        }
-    }
-
-    void DrawVelocity(SpringHandler.particle[] ps)
-    {
-        foreach (var item in ps)
-        {
-            Debug.DrawRay(item.position, item.velocity, Color.white);
-        }
-    }
-
-    void DrawSpring(SpringHandler.spring ss, ref SpringHandler.particle[] ps)
-    {
-        Debug.DrawLine(ps[ss.connectionA].position, ps[ss.connectionB].position, Color.blue);
-    }
-
-    void DrawSpring(SpringHandler.spring ss, ref SpringHandler.particle[] ps, Color col)
-    {
-        Debug.DrawLine(ps[ss.connectionA].position, ps[ss.connectionB].position, col);
-    }
-
 
     void Print(string name, SpringHandler.particle[] array)
     {
@@ -434,13 +382,15 @@ public class ClothSimulator : MonoBehaviour {
             //if ((i != 0) && (array[i - 1] > array[i]))
             //    problems += "Discontinuity found at " + i + "!! \n";
 
-            values +=  array[i].structuralSprings.x + ", " + array[i].structuralSprings.y + ", " + array[i].structuralSprings.z + ", " + array[i].structuralSprings.w + ", ";
+            values += "ID, " + array[i].iD +":" +  array[i].structuralSprings.x + ", " + array[i].structuralSprings.y + ", " + array[i].structuralSprings.z + ", " + array[i].structuralSprings.w + "\n";
         }
 
         Debug.Log(name + " :  " + values + "\n" + problems);
+        Debug.Log("Count " + array.Length);
+
     }
 
-    void Print(string name, testParticle[] array)
+    void Print(string name, clothVertex[] array)
     {
         string values = "";
         string problems = "";
@@ -450,18 +400,18 @@ public class ClothSimulator : MonoBehaviour {
             //if ((i != 0) && (array[i - 1] > array[i]))
             //    problems += "Discontinuity found at " + i + "!! \n";
 
-            values += array[i].springs[0] + ", " + array[i].springs[1] + ", " + array[i].springs[2] + ", " + array[i].springs[3] + ", ";
+            values += "ID, " + array[i].index;// + ":" + array[i].structuralSprings.x + ", " + array[i].structuralSprings.y + ", " + array[i].structuralSprings.z + ", " + array[i].structuralSprings.w + "\n";
         }
 
         Debug.Log(name + " :  " + values + "\n" + problems);
+        Debug.Log("Count " + array.Length);
+
     }
 
     private void OnDestroy()
     {
         particleBuffer.Release();
         springBuffer.Release();
-        testParticleBuffer.Release();
+        initialPosBuffer.Release();
     }
-
-
 }

@@ -12,7 +12,6 @@ public class BufferExample : MonoBehaviour {
 
     public Material mat;
 
-    public ParticleSystem particleSystem;
 
     RenderTexture pointRt;
     RenderTexture velRt;
@@ -54,7 +53,6 @@ public class BufferExample : MonoBehaviour {
         computeShader.Dispatch(mortonKernelHandler, count / 32, 1, 1);
         computeShader.Dispatch(mainKernelHandler, count / 32, 1, 1);
 
-        particle[] newpoints = new particle[count];
     }
 
   
@@ -75,7 +73,7 @@ public class BufferExample : MonoBehaviour {
     float[] GetPoints()
     {
         float[] points = new float[count * 3];
-        Random.seed = 0;
+        Random.InitState(0);
 
         for (int i = 0; i < count; i++)
         {
@@ -91,7 +89,7 @@ public class BufferExample : MonoBehaviour {
     Vector3[] GetVectorPoints()
     {
         Vector3[] points = new Vector3[count];
-        Random.seed = 0;
+        Random.InitState(0);
 
         for (int i = 0; i < count; i++)
         {
@@ -104,7 +102,8 @@ public class BufferExample : MonoBehaviour {
     particle[] GetParticlePoints()
     {
         particle[] points = new particle[count];
-        Random.seed = 42;
+        Random.InitState(42);
+
 
         for (int i = 0; i < count; i++)
         {
@@ -126,7 +125,6 @@ public class BufferExample : MonoBehaviour {
             particles[i].velocity = points[i].direction;
         }
 
-        particleSystem.SetParticles(particles, count);
     }
 
     void OnPostRender()

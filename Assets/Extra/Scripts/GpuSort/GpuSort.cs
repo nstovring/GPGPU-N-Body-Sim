@@ -85,46 +85,46 @@ static public class GpuSort
 
         // Determine parameters.
         int NUM_ELEMENTS =  inBuffer.count;
-        uint MATRIX_WIDTH = BITONIC_BLOCK_SIZE;
-        uint MATRIX_HEIGHT = 0;// NUM_ELEMENTS / BITONIC_BLOCK_SIZE;
+        //uint MATRIX_WIDTH = BITONIC_BLOCK_SIZE;
+        //uint MATRIX_HEIGHT = 0;// NUM_ELEMENTS / BITONIC_BLOCK_SIZE;
         shader.SetInt("count", NUM_ELEMENTS);
         shader.SetBuffer(kSort, "Data", inBuffer);
         shader.Dispatch(kSort, (int)((NUM_ELEMENTS / BITONIC_BLOCK_SIZE)),1, 1);
         return;
 
-        // Sort the data
-        // First sort the rows for the levels <= to the block size
-        for (uint level = 2; level <= BITONIC_BLOCK_SIZE; level <<= 1)
-        {
-            SetConstants(shader, level, level, MATRIX_HEIGHT, MATRIX_WIDTH);
-            
-            // Sort the row data
-            shader.SetBuffer(kSort, "Data", inBuffer);
-            shader.Dispatch(kSort, (int) (NUM_ELEMENTS / BITONIC_BLOCK_SIZE), (int)(NUM_ELEMENTS / BITONIC_BLOCK_SIZE), 1);
-        }
-
-        // Then sort the rows and columns for the levels > than the block size
-        // Transpose. Sort the Columns. Transpose. Sort the Rows.
-        for (uint level = (BITONIC_BLOCK_SIZE << 1); level <= NUM_ELEMENTS; level <<= 1)
-        {
-            // Transpose the data from buffer 1 into buffer 2
-            //SetConstants(shader, (level / BITONIC_BLOCK_SIZE), (level & ~NUM_ELEMENTS) / BITONIC_BLOCK_SIZE, MATRIX_WIDTH, MATRIX_HEIGHT);
-            //shader.SetBuffer(kTranspose, "Input", inBuffer);
-            //shader.SetBuffer(kTranspose, "Data", tmpBuffer);
-            //shader.Dispatch(kTranspose, (int) (MATRIX_WIDTH / TRANSPOSE_BLOCK_SIZE), (int) (MATRIX_HEIGHT / TRANSPOSE_BLOCK_SIZE), 1);
-
-            shader.SetBuffer(kSort, "Data", tmpBuffer);
-            shader.Dispatch(kSort, (int) (NUM_ELEMENTS / BITONIC_BLOCK_SIZE), 1, 1);
-
-            //// Transpose the data from buffer 2 back into buffer 1
-            //SetConstants(shader, BITONIC_BLOCK_SIZE, level, MATRIX_HEIGHT, MATRIX_WIDTH);
-            //shader.SetBuffer(kTranspose, "Input", tmpBuffer);
-            //shader.SetBuffer(kTranspose, "Data", inBuffer);
-            //shader.Dispatch(kTranspose, (int) (MATRIX_HEIGHT / TRANSPOSE_BLOCK_SIZE), (int) (MATRIX_WIDTH / TRANSPOSE_BLOCK_SIZE), 1);
-
-            shader.SetBuffer(kSort, "Data", inBuffer);
-            shader.Dispatch(kSort, (int) ((NUM_ELEMENTS / TRANSPOSE_BLOCK_SIZE)), (int)((NUM_ELEMENTS / TRANSPOSE_BLOCK_SIZE)), 1);
-        }
+        //// Sort the data
+        //// First sort the rows for the levels <= to the block size
+        //for (uint level = 2; level <= BITONIC_BLOCK_SIZE; level <<= 1)
+        //{
+        //    SetConstants(shader, level, level, MATRIX_HEIGHT, MATRIX_WIDTH);
+        //    
+        //    // Sort the row data
+        //    shader.SetBuffer(kSort, "Data", inBuffer);
+        //    shader.Dispatch(kSort, (int) (NUM_ELEMENTS / BITONIC_BLOCK_SIZE), (int)(NUM_ELEMENTS / BITONIC_BLOCK_SIZE), 1);
+        //}
+        //
+        //// Then sort the rows and columns for the levels > than the block size
+        //// Transpose. Sort the Columns. Transpose. Sort the Rows.
+        //for (uint level = (BITONIC_BLOCK_SIZE << 1); level <= NUM_ELEMENTS; level <<= 1)
+        //{
+        //    // Transpose the data from buffer 1 into buffer 2
+        //    //SetConstants(shader, (level / BITONIC_BLOCK_SIZE), (level & ~NUM_ELEMENTS) / BITONIC_BLOCK_SIZE, MATRIX_WIDTH, MATRIX_HEIGHT);
+        //    //shader.SetBuffer(kTranspose, "Input", inBuffer);
+        //    //shader.SetBuffer(kTranspose, "Data", tmpBuffer);
+        //    //shader.Dispatch(kTranspose, (int) (MATRIX_WIDTH / TRANSPOSE_BLOCK_SIZE), (int) (MATRIX_HEIGHT / TRANSPOSE_BLOCK_SIZE), 1);
+        //
+        //    shader.SetBuffer(kSort, "Data", tmpBuffer);
+        //    shader.Dispatch(kSort, (int) (NUM_ELEMENTS / BITONIC_BLOCK_SIZE), 1, 1);
+        //
+        //    //// Transpose the data from buffer 2 back into buffer 1
+        //    //SetConstants(shader, BITONIC_BLOCK_SIZE, level, MATRIX_HEIGHT, MATRIX_WIDTH);
+        //    //shader.SetBuffer(kTranspose, "Input", tmpBuffer);
+        //    //shader.SetBuffer(kTranspose, "Data", inBuffer);
+        //    //shader.Dispatch(kTranspose, (int) (MATRIX_HEIGHT / TRANSPOSE_BLOCK_SIZE), (int) (MATRIX_WIDTH / TRANSPOSE_BLOCK_SIZE), 1);
+        //
+        //    shader.SetBuffer(kSort, "Data", inBuffer);
+        //    shader.Dispatch(kSort, (int) ((NUM_ELEMENTS / TRANSPOSE_BLOCK_SIZE)), (int)((NUM_ELEMENTS / TRANSPOSE_BLOCK_SIZE)), 1);
+        //}
     }
 
     static private void SetConstants(ComputeShader shader, uint iLevel, uint iLevelMask, uint iWidth, uint iHeight)

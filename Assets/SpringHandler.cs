@@ -11,8 +11,10 @@ static class SpringHandler
     {
         public float damping;
         public float stiffness;
+        public float restLength;
         public int connectionA;
         public int connectionB;
+        public int springType;
     };
 
     public struct particle
@@ -28,61 +30,111 @@ static class SpringHandler
         public int4 shearBendingSprings;
     };
 
-    public static spring GetSpring(int x, int y, int rows, out int connectedParticleIndex, int rangeX, int rangeY)
+    public enum SpringType { StructuralSpring, ShearSpring, StructuralBendingSpring, ShearBendingSpring };
+
+    public static spring ApplyChanges(spring spring, ClothSimulator.SpringVariables vars)
     {
-        spring Spring = new spring();
-        Spring.connectionA = y + (x * rows);
-        Spring.connectionB = (y + ((x + rangeX) * rows) + rangeY);
-        connectedParticleIndex = (y + ((x + rangeX) * rows) + rangeY);
-        return Spring;
+        spring.stiffness = vars.stiffness;
+        spring.damping = vars.damping;
+        return spring;
     }
 
-    public static spring GetSpring(int x, int y, int rows, out int connectedParticleIndex, int rangeX, int rangeY,ClothSimulator.SpringVariables vars)
+    static Vector3 GetParticlePos(int x, int y, int rows)
+    {
+        return new Vector3(x / (float)rows, 0, y / (float)rows);
+    }
+
+    public static spring GetSpring(int x, int y, int rows, out int connectedParticleIndex, int rangeX, int rangeY, ClothSimulator.SpringVariables vars, SpringType type)
     {
         spring Spring = new spring();
         Spring.connectionA = y + (x * rows);
         Spring.connectionB = (y + ((x + rangeX) * rows) + rangeY);
-        Spring.damping = vars.damping;
         Spring.stiffness = vars.stiffness;
+        Spring.damping = vars.damping;
+        Spring.springType = (int)type;
+        Spring.restLength = Vector3.Distance(GetParticlePos(x,y,rows), GetParticlePos(x + rangeX, y + rangeY, rows));
         connectedParticleIndex = (y + ((x + rangeX) * rows) + rangeY);
         return Spring;
     }
 
-    public static spring GetHorizontalSpring(int x, int y, int rows, particle[] particles, out int connectedParticleIndex, int range)
+    public static void DrawStructuralSprings(particle[] ps, spring[] ss, int i)
     {
-        spring Spring = new spring();
-        Spring.connectionA = y + (x * rows);
-        Spring.connectionB = y + ((x + range) * rows);
-        connectedParticleIndex = y + ((x + range) * rows);
-        return Spring;
+        if (IsValidSpring(ps[i].structuralSprings.x))
+            DrawSpring(ss[ps[i].structuralSprings.x], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structuralSprings.y))
+            DrawSpring(ss[ps[i].structuralSprings.y], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structuralSprings.z))
+            DrawSpring(ss[ps[i].structuralSprings.z], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structuralSprings.w))
+            DrawSpring(ss[ps[i].structuralSprings.w], ref ps, Color.blue);
     }
 
-    public static spring GetVerticalSpring(int x, int y, int rows, particle[] particles, int springIndex, int range)
+    public static void DrawShearSprings(particle[] ps, spring[] ss, int i)
     {
-        spring Spring = new spring();
-        Spring.connectionA = y + (x * rows);
-        Spring.connectionB = (y + (x * rows) + range);
-        particles[(y + (x * rows) + range)].structuralSprings.w = springIndex;
-        return Spring;
+        if (IsValidSpring(ps[i].shearSprings.x))
+            DrawSpring(ss[ps[i].shearSprings.x], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearSprings.y))
+            DrawSpring(ss[ps[i].shearSprings.y], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearSprings.z))
+            DrawSpring(ss[ps[i].shearSprings.z], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearSprings.w))
+            DrawSpring(ss[ps[i].shearSprings.w], ref ps, Color.green);
     }
 
-    public static spring GetRightUpDiagonalSpring(int x, int y, int rows, particle[] particles, int springIndex, int range)
+    public static void DrawStructuralBendingSprings(particle[] ps, spring[] ss, int i)
     {
-        spring Spring = new spring();
-        Spring.connectionA = y + (x * rows);
-        Spring.connectionB = (y + ((x + range) * rows) + range);
-        particles[(y + ((x + range) * rows) + range)].shearSprings.z = springIndex;
-        return Spring;
+        if (IsValidSpring(ps[i].structutralBendingSprings.x))
+            DrawSpring(ss[ps[i].structutralBendingSprings.x], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structutralBendingSprings.y))
+            DrawSpring(ss[ps[i].structutralBendingSprings.y], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structutralBendingSprings.z))
+            DrawSpring(ss[ps[i].structutralBendingSprings.z], ref ps, Color.blue);
+
+        if (IsValidSpring(ps[i].structutralBendingSprings.w))
+            DrawSpring(ss[ps[i].structutralBendingSprings.w], ref ps, Color.blue);
     }
 
-    public static spring GetDownRightDiagonalSpring(int x, int y, int rows, particle[] particles, int springIndex, int range)
+    public static void DrawShearBendingSprings(particle[] ps, spring[] ss, int i)
     {
-        spring Spring = new spring();
-        Spring.connectionA = y + (x * rows);
-        Spring.connectionB = (y + ((x - range) * rows) + range);
-        particles[(y + ((x - range) * rows) + range)].shearSprings.w = springIndex;
-        return Spring;
+        if (IsValidSpring(ps[i].shearBendingSprings.x))
+            DrawSpring(ss[ps[i].shearBendingSprings.x], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearBendingSprings.y))
+            DrawSpring(ss[ps[i].shearBendingSprings.y], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearBendingSprings.z))
+            DrawSpring(ss[ps[i].shearBendingSprings.z], ref ps, Color.green);
+
+        if (IsValidSpring(ps[i].shearBendingSprings.w))
+            DrawSpring(ss[ps[i].shearBendingSprings.w], ref ps, Color.green);
     }
+
+    public static void DrawVelocity(particle[] ps)
+    {
+        foreach (var item in ps)
+        {
+            Debug.DrawRay(item.position, item.velocity, Color.white);
+        }
+    }
+
+    public static void DrawSpring(SpringHandler.spring ss, ref SpringHandler.particle[] ps)
+    {
+        Debug.DrawLine(ps[ss.connectionA].position, ps[ss.connectionB].position, Color.blue);
+    }
+
+    public static void DrawSpring(SpringHandler.spring ss, ref SpringHandler.particle[] ps, Color col)
+    {
+        Debug.DrawLine(ps[ss.connectionA].position, ps[ss.connectionB].position, col);
+    }
+
 
     public static void GetSpringForce(ref spring[] springs, ref particle[] particles, out Vector3 dampingForce, out Vector3 springForce, particle p, int springIndex)
     {
@@ -95,6 +147,13 @@ static class SpringHandler
             springForce = -s.stiffness * (p.position - particles[s.connectionA].position);
         else
             springForce = -s.stiffness * (p.position - particles[s.connectionB].position);
+    }
+
+    public static bool IsValidSpring(int x)
+    {
+        if (x != -1)
+            return true;
+        return false;
     }
 }
 

@@ -10,8 +10,6 @@
 // Pragmas
 //--------------------------------------------------------------------------------------
 
-#pragma kernel BitonicSort
-#pragma kernel MatrixTranspose
 #pragma kernel RadixSort
 //--------------------------------------------------------------------------------------
 // Constants
@@ -20,6 +18,9 @@
 #define BITONIC_BLOCK_SIZE 512
 #define TRANSPOSE_BLOCK_SIZE 16
 
+#define THREADX 128
+#define THREADY 1
+#define GROUP_THREADS THREADX * THREADY
 //--------------------------------------------------------------------------------------
 // Constant Buffers
 //--------------------------------------------------------------------------------------
@@ -45,138 +46,16 @@ int collision;
 StructuredBuffer<particle> Input : register( t0 );
 RWStructuredBuffer<particle> Data : register( u0 );
 
-//RWTexture2D<float4> Result : register (u1);
-//--------------------------------------------------------------------------------------
-// Bitonic Sort Compute Shader
-//--------------------------------------------------------------------------------------
-groupshared particle shared_data[BITONIC_BLOCK_SIZE];
-
-[numthreads(BITONIC_BLOCK_SIZE, 1, 1)]
-void BitonicSort( uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID,  uint3 GTid : SV_GroupThreadID,  uint GI : SV_GroupIndex )
-{
-    // Load shared data
-    shared_data[GI] = Data[DTid.x];
-    GroupMemoryBarrierWithGroupSync();
-    
-    // Sort the shared data
-    for (uint j = g_iLevel >> 1 ; j > 0 ; j >>= 1)
-    {
-		bool alpha = (shared_data[GI & ~j].morton <= shared_data[GI | j].morton) ;
-		bool beta = (bool)(g_iLevelMask & DTid.x);
-		bool phi = ((shared_data[GI & ~j].morton <= shared_data[GI | j].morton) == (bool)(g_iLevelMask & DTid.x));
-		particle result = shared_data[GI];
-		
-		GroupMemoryBarrierWithGroupSync();
-		if(phi)
-		result = shared_data[GI ^ j];
-
-		//particle result = phi ? shared_data[GI ^ j] : shared_data[GI];
-		//uint morton1 = shared_data[GI & ~j].morton;
-		//uint morton2 = shared_data[GI | j].morton;
-        //result = ((morton1 <= morton2) == (bool)(g_iLevelMask & DTid.x)) ? shared_data[GI ^ j] : shared_data[GI];
-        GroupMemoryBarrierWithGroupSync();
-        shared_data[GI] = result;
-        GroupMemoryBarrierWithGroupSync();
-    }
-    
-    // Store shared data
-    Data[DTid.x] = shared_data[GI];
-}
-cbuffer cbCS : register(b0)
-{
-	int c_height : packoffset(c0.x);
-	int c_width : packoffset(c0.y);		// size view port
-	
-};
 bool getBit(uint i, uint n) {
 	return ((n >> i) & 1) == 1;
 }
 
-#define THREADX 512
-#define THREADY 1
-#define GROUP_THREADS THREADX * THREADY
 groupshared particle o[GROUP_THREADS];
 groupshared uint e[GROUP_THREADS];
 groupshared uint f[GROUP_THREADS];
 
 groupshared uint d[GROUP_THREADS];
 groupshared uint totalFalses;
-
-int BinarySearch(int idx, uint mortonCode){
-	//uint count, stride;
-	//inputPoints.GetDimensions(count,stride);
-	int count = 1024;
-	int arraySize = 512;
-	int normalizedIndex = idx%arraySize;
-	int direction = 0;
-	int center = ((idx + arraySize)%count) - normalizedIndex + arraySize/2;
-	int step = center - 1;
-	
-	int maxCount = log2(arraySize);
-	int curCount = 0;
-	float stepScale = 0.25;
-	//[unroll((int)log2(arraySize))][allow_uav_condition]
-	//for(; (arraySize)*stepScale > 0 ; stepScale *= 0.5){
-	//	 step += direction;
-	//	
-	//	uint middle = Data[step].morton;
-	//	uint pluOne = Data[step+1].morton;
-	//	GroupMemoryBarrierWithGroupSync();
-	//	int normalizedStep = step%arraySize;
-	//	
-	//	
-	//	if(mortonCode < middle){
-	//		direction = -1 * (arraySize)*stepScale;
-	//		stepScale *= 0.5;
-	//	}
-	//	else if(pluOne < mortonCode){
-	//		direction = 1 * (arraySize)*stepScale;
-	//		stepScale *= 0.5;
-	//		
-	//	}else if (middle < mortonCode && pluOne > mortonCode)
-    //    {
-	//		return ((normalizedStep) + normalizedIndex + 1)%count;
-    //    }
-	//
-	//	if((arraySize)*stepScale < 1 && middle< mortonCode && pluOne < mortonCode){
-	//		return step+1;
-	//	}
-	//
-	//}
-    do
-    {
-	    step += direction;
-		
-		uint middle = Data[step].morton;
-		uint pluOne = Data[step+1].morton;
-		GroupMemoryBarrierWithGroupSync();
-		int normalizedStep = step%arraySize;
-		
-		if((arraySize)*stepScale < 1 && middle< mortonCode && pluOne < mortonCode){
-				return step+1;
-		}
-	
-		if(mortonCode < middle){
-			direction = -1 * (arraySize)*stepScale;
-			stepScale *= 0.5;
-		}
-		else if(pluOne < mortonCode){
-			direction = 1 * (arraySize)*stepScale;
-			stepScale *= 0.5;
-			
-		}else if (middle < mortonCode && pluOne > mortonCode)
-        {
-			return ((normalizedStep) + normalizedIndex + 1)%count;
-        }
-		curCount++;
-    }
-    while (curCount < maxCount && (arraySize)*stepScale > 0 && step > 0 && step < count );
-
-    return idx%arraySize;
-}
-
-
-int count;
 
 [numthreads(THREADX, 1, 1)]
 void RadixSort(uint3 Gid  : SV_GroupID,
@@ -251,24 +130,9 @@ void RadixSort(uint3 Gid  : SV_GroupID,
 	//	uint count,stride;
 	//Input.GetDimensions(count,stride);
 	Data[DTid.x]= o[d[GI]];
-	GroupMemoryBarrierWithGroupSync();
-
-	//int index = BinarySearch(DTid.x, o[d[GI]].morton);
+	
 	//Data[DTid.x].collision = index;//o[d[GI]]; //DTid.x% GROUP_THREADS) +(DTid.x% GROUP_THREADS) + groupnumber
 	//GroupMemoryBarrierWithGroupSync();
 
 	}
 
-//--------------------------------------------------------------------------------------
-// Matrix Transpose Compute Shader
-//--------------------------------------------------------------------------------------
-groupshared particle transpose_shared_data[TRANSPOSE_BLOCK_SIZE * TRANSPOSE_BLOCK_SIZE];
-
-[numthreads(TRANSPOSE_BLOCK_SIZE, TRANSPOSE_BLOCK_SIZE, 1)]
-void MatrixTranspose( uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex )
-{
-    transpose_shared_data[GI] = Input[DTid.y * g_iWidth + DTid.x];
-    GroupMemoryBarrierWithGroupSync();
-    uint2 XY = DTid.yx - GTid.yx + GTid.xy;
-    Data[XY.y * g_iHeight + XY.x] = transpose_shared_data[GTid.x * TRANSPOSE_BLOCK_SIZE + GTid.y];
-}
