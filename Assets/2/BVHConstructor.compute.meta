@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 9faad6cb2d5a8d2488b5ee7d7e54d4d9
-folderAsset: yes
-timeCreated: 1518986059
+guid: 95f527fbb41a9e34da6dacc69f48fdf5
+timeCreated: 1524139995
 licenseType: Free
-DefaultImporter:
+ComputeShaderImporter:
   externalObjects: {}
+  currentAPIMask: 4
   userData: 
   assetBundleName: 
   assetBundleVariant: 

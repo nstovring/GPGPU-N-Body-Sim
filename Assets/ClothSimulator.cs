@@ -19,7 +19,9 @@ public class ClothSimulator : MonoBehaviour {
 
     int springCount;
     //[Range(1,50)]
+    [Delayed]
     public float globalStiffness;
+    [Delayed]
     [Range(0,1)]
     public float damping;
     [Range(1f,1000)]
@@ -224,7 +226,7 @@ public class ClothSimulator : MonoBehaviour {
         }
     }
 
-    int solverSteps = 32;
+    int solverSteps = 16;
     void Update () {
 
         if (clothHandler != null)
@@ -413,5 +415,6 @@ public class ClothSimulator : MonoBehaviour {
         particleBuffer.Release();
         springBuffer.Release();
         initialPosBuffer.Release();
+        vertexBuffer.Release();
     }
 }

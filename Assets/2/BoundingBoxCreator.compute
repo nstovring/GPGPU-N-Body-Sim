@@ -1,0 +1,65 @@
+﻿#include "BVHTools.cginc"
+#pragma kernel CSGenerateBoundingBoxes
+
+[numthreads(ThreadX, 1, 1)]
+void CSGenerateBoundingBoxes(uint3 id : SV_DISPATCHTHREADID, uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    int parentId = boundingLeafNodes[id.x].parentId;
+    int traversalCount = 0;
+    uint count;
+    uint stride;
+    boundingLeafNodes.GetDimensions(count, stride);
+    internalNode parent;
+    bool solved = false;
+    int counter = 0;
+    //[unroll(log2(count))]
+    for (int i = 0; i < 32; i++)
+    {
+       parent = boundingInternalNodes[parentId];
+       DeviceMemoryBarrierWithGroupSync();
+       float3 Min;
+       float3 Max;
+       CalculateAABB(parent, Min, Max);
+       CalculateAABB(Min, Max, parent.minPos, parent.maxPos, Min, Max);
+       
+       boundingInternalNodes[parentId] = parent;
+       boundingInternalNodes[parentId].minPos = Min;
+       boundingInternalNodes[parentId].maxPos = Max;
+       parentId = parent.parentId;
+       //if (parentId == -1)
+       //{
+       //    break;
+       //}
+    }
+
+    //while (counter < 64)
+    //{
+    //    if (!solved)
+    //    {
+    //        
+    //        parent = boundingInternalNodes[parentId];
+    //       // DeviceMemoryBarrierWithGroupSync();
+    //        float3 Min;
+    //        float3 Max;
+    //        CalculateAABB(parent, Min, Max);
+    //        CalculateAABB(Min, Max, parent.minPos, parent.maxPos, Min, Max);
+    //        
+    //        //parent.minPos = Min;
+    //        //parent.maxPos = Max;
+    //
+    //        boundingInternalNodes[parentId] = parent;
+    //        boundingInternalNodes[parentId].minPos = Min;
+    //        boundingInternalNodes[parentId].maxPos = Max;
+    //        parentId = parent.parentId;
+    //        if (parentId == -1)
+    //        {
+    //            InterlockedAdd(boundingInternalNodes[0].visited, 1);
+    //            solved = true;
+    //        }
+    //    }
+    //    DeviceMemoryBarrierWithGroupSync();
+    //    counter++;
+    //}
+	//AllMemoryBarrierWithGroupSync();
+}

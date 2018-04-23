@@ -1,0 +1,99 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#include "BVHConstructor.cginc"
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWStructuredBuffer<int> indexBuffer;
+
+#pragma kernel CSCreateBVH
+[numthreads(ThreadX, 1, 1)]
+void CSCreateBVH(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    uint count, stride;
+    boundingInternalNodes.GetDimensions(count, stride);
+    if (id.x >= count)
+        return;
+
+    internalNode intNode = internalNodes[id.x];
+    intNode.parentId = -1;
+    intNode.objectId = -1;
+    intNode.visited = 0;
+    intNode.nodeId = id.x;
+    internalNodes[id.x] = intNode;
+    boundingInternalNodes[id.x] = intNode;
+
+    //intNode.parentId = -1;
+    //intNode.objectId = -1;
+    //intNode.visited = 0;
+    //intNode.nodeId = id.x;
+
+
+    int2 inrange = determineRange(id.x);
+    int first = inrange.x;
+
+    int last = inrange.y;
+
+    int split = findSplit(first, last);
+
+    indexBuffer[id.x] = last;
+    
+    int2 leaves;
+    int2 intNodes;
+
+    float3 aMin;
+    float3 aMax;
+    float3 bMin;
+    float3 bMax;
+   
+
+    if (split == first)
+    {
+        leaves.x = split;
+        boundingLeafNodes[split].parentId = id.x;
+        aMin = boundingLeafNodes[split].minPos;
+        aMax = boundingLeafNodes[split].maxPos;
+
+        intNodes.x = -1;
+    }
+    else
+    {
+        intNodes.x = split;
+        boundingInternalNodes[split].parentId = id.x;
+        leaves.x = -1;
+        aMin = boundingLeafNodes[first].minPos;
+        aMax = boundingLeafNodes[first].maxPos;
+
+    }
+    if (split + 1 == last)
+    {
+        leaves.y = split + 1;
+        boundingLeafNodes[split + 1].parentId = id.x;
+        intNodes.y = -1;
+        bMin = boundingLeafNodes[leaves.y].minPos;
+        bMax = boundingLeafNodes[leaves.y].maxPos;
+    }
+    else
+    {
+        intNodes.y = split + 1;
+        boundingInternalNodes[split + 1].parentId = id.x;
+        leaves.y = -1;
+        bMin = boundingLeafNodes[first].minPos;
+        bMax = boundingLeafNodes[last].maxPos;
+    }
+    
+    float3 Max;
+    float3 Min;
+    CalculateAABB(aMin, aMax, bMin, bMax, Min, Max);
+
+    DeviceMemoryBarrier();
+    internalNode node = boundingInternalNodes[id.x];
+    node.leaves = leaves;
+    node.bLeaves = inrange;
+    node.minPos = Min;
+    node.maxPos = Max;
+    node.intNodes = intNodes;
+    boundingInternalNodes[id.x] = node;
+    internalNodes[id.x] = node;
+    DeviceMemoryBarrier();
+
+}

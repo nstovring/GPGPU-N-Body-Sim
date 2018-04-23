@@ -52,7 +52,7 @@ static class SpringHandler
         Spring.stiffness = vars.stiffness;
         Spring.damping = vars.damping;
         Spring.springType = (int)type;
-        Spring.restLength = Vector3.Distance(GetParticlePos(x,y,rows), GetParticlePos(x + rangeX, y + rangeY, rows));
+        Spring.restLength = Vector3.Distance(GetParticlePos((x * rows), y,rows), GetParticlePos((x + rangeX) * rows, y + rangeY, rows))/ rows;
         connectedParticleIndex = (y + ((x + rangeX) * rows) + rangeY);
         return Spring;
     }

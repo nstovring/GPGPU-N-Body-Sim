@@ -53,6 +53,14 @@ bool IsValidSpring(int x)
 		return true;
 	return false;
 }
+
+float3 calculateAirResistanceForce(float3 velocity, float dragCoeffecient, float crossAreal)
+{
+    float airDensity = 1.225f;
+    float3 dragForce = (0.5f) * airDensity * (pow(velocity, 2)) * dragCoeffecient * crossAreal;
+    return dragForce;
+}
+
 [numthreads(8,1,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -70,34 +78,36 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 		float3 dampingForce = float3(0, 0, 0);
 		float3 springForce = float3(0, 0, 0);
 
-		for (int i = 0; i < p.springs.Length; i++)
+		for (int i = 0; i < 16; i++)
 		{
 			if (IsValidSpring(p.springs[i])) {
 				spring s = springs[p.springs[i]];
+                particle b = particles[s.connectionB];
+                particle a = particles[s.connectionA];
+                bool reversed = b.iD != p.iD;
+                if (reversed)
+                {
+                    b = a;
+                    a = p;
+                }
 
-				bool N = particles[s.connectionB].iD == p.iD;
-				if (particles[s.connectionB].iD == p.iD) {
-					dampingForce += s.damping * (particles[s.connectionA].velocity - velocity);// (-1 * Normalize(velocity)) * length(velocity);
-					springForce += (-s.stiffness *(position - particles[s.connectionA].position) * stiffness) * (distance(position, particles[s.connectionA].position) - s.restLength);
-				}																				
-				else {																			
-					dampingForce += s.damping * (particles[s.connectionB].velocity - velocity);
-					springForce += (-s.stiffness *(position - particles[s.connectionB].position)  * stiffness) * ( distance(position, particles[s.connectionB].position) - s.restLength);
-				}
+                dampingForce += -s.damping * (b.velocity - a.velocity);
+                springForce += -s.stiffness * (a.position - b.position) * (s.restLength - distance(b.position, a.position)) * stiffness;
 			}
 		}
-
 		//Super Simple Collision
 		float3 c = distance(position + velocity * delta, spherePos) < 0.54 ? Normalize(position + velocity * delta - spherePos) * (1 - distance(position + velocity * delta, spherePos)) : float3(0, 0, 0);
+        //Plane Collision
+        float3 cP = (position + velocity * delta).y < 0.1 ? float3(0, 1, 0) * (1 - (position + velocity * delta).y) : float3(0, 0, 0);
 
-		float3 force = dampingForce + springForce + p.mass * gravity;
-	
-		float3 acceleration = force / p.mass;
-	
-		acceleration *= delta;
-		velocity = velocity + acceleration * delta + c ;
 
+        float3 force = dampingForce + springForce + 1 * gravity;// + airResistanceForce;
 	
+		float3 acceleration = force / 1;
+	
+		//acceleration *= delta;
+        velocity = velocity + acceleration * delta + c + cP;
+
 		//velocity *= delta;
 		position = position + velocity * delta;
 		//--------------------------------------------

@@ -4,9 +4,11 @@
 
 Shader "Hidden/BallRayMarcher"
 {
-	Properties
-	{
-		_MainTex ("Texture", 2D) = "white" {}
+	Properties {
+		_Color ("Color", Color) = (1,1,1,1)
+		_MainTex ("Albedo (RGB)", 2D) = "white" {}
+		_Glossiness ("Smoothness", Range(0,1)) = 0.5
+		_Metallic ("Metallic", Range(0,1)) = 0.0
 	}
 	SubShader
 	{
@@ -33,10 +35,11 @@ Shader "Hidden/BallRayMarcher"
 			#pragma vertex vert
 			#pragma geometry geom
 			#pragma fragment frag
-			
+
 			#include "UnityCG.cginc"
 			#pragma multi_compile_fog
 			#pragma multi_compile_fwdadd_fullshadows
+
 						//#pragma multi_compile_fwdbase
 			#include "AutoLight.cginc"
 			#include "UnityCG.cginc"

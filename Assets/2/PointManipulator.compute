@@ -1,43 +1,14 @@
-﻿// Each #kernel tells which function to compile; you can have many kernels
-#pragma kernel CSMain
+﻿// shadertype=unity
+// Each #kernel tells which function to compile; you can have many kernels
+
 
 //#pragma kernel CSLoad
 
-#define ThreadX 128
+#include "BVHTraversal.cginc"
 
-
-struct particle{
-float3 position;
-float3 direction;
-float3 color;
-float radius;
-uint mortonId;
-int collision;
-};
-
-struct internalNode{
-	int objectId;
-	int nodeId;
-	int parentId;
-	int2 intNodes;
-	int2 leaves;
-	int2 bLeaves;
-	float3 minPos;
-	float3 maxPos;
-	float sRadius;
-	int visited;
-	uint mortonId;
-};
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
-static const float PI = 3.14159265f;
 
-RWStructuredBuffer<particle> inputPoints : register(u0);
-RWStructuredBuffer<particle> mergeOutputBuffer: register(u1);
-RWStructuredBuffer<internalNode> internalNodes : register(u2);
-RWStructuredBuffer<internalNode> leafNodes : register(u3);
-RWStructuredBuffer<internalNode> boundingInternalNodes : register(u4);
-RWStructuredBuffer<internalNode> boundingLeafNodes : register(u5);
 
 float DeltaTime;
 float speed;
@@ -46,167 +17,6 @@ float gravity;
 float radius;
 float3 gravityVec;
 
-
-// Expands a 10-bit integer into 30 bits
-// by inserting 2 zeros after each bit.
-uint expandBits(uint v)
-{
-    v = (v * 0x00010001u) & 0xFF0000FFu;
-    v = (v * 0x00000101u) & 0x0F00F00Fu;
-    v = (v * 0x00000011u) & 0xC30C30C3u;
-    v = (v * 0x00000005u) & 0x49249249u;
-    return v;
-}
-
-// Calculates a 30-bit Morton code for the
-// given 3D point located within the unit cube [0,1].
-uint morton3D(float x, float y, float z)
-{
-    x = min(max(x * 1024.0f, 0.0f), 1023.0f);
-    y = min(max(y * 1024.0f, 0.0f), 1023.0f);
-    z = min(max(z * 1024.0f, 0.0f), 1023.0f);
-    uint xx = expandBits((uint)x);
-    uint yy = expandBits((uint)y);
-    uint zz = expandBits((uint)z);
-    return xx * 4 + yy * 2 + zz;
-}
-
-
-
-bool isLeaf(internalNode node){
-	if(node.objectId != -1)
-		return true;
-	return false;
-}
-
-void GetChildren(internalNode node, out internalNode childA, out internalNode childB){
-	int2 leaves = node.leaves;
-	int2 intNodes = node.intNodes;
-	childA.nodeId = -1;
-	childB.nodeId = -1;
-
-	if(leaves.x != -1)
-		childA = leafNodes[leaves.x];
-	if(leaves.y != -1)
-		childB = leafNodes[leaves.y];
-	if(intNodes.x != -1)
-		childA = internalNodes[intNodes.x];
-	if(intNodes.y != -1)
-		childB = internalNodes[intNodes.y];
-}
-
-internalNode CalculateBoundingSphere(internalNode node){
-
-	internalNode childA;
-	internalNode childB;
-	GetChildren(node,childA,childB);
-
-	float3 parentPos = (childA.minPos + childB.minPos)/2; 
-	float parentR = (distance(childA.minPos,childB.minPos) * angularSpeed) + (childA.sRadius + childB.sRadius)/2;
-
-	node.minPos = parentPos;
-	node.sRadius = parentR;
-	return node;
-}
-
-void CalculateAABB(internalNode node,out float3 minPoint,out float3 maxPoint){
-
-	internalNode childA;
-	internalNode childB;
-	GetChildren(node,childA,childB);
-	float3 posAA = childA.minPos;
-	float3 posAB = childA.maxPos;
-	float3 posBA = childB.minPos;
-	float3 posBB = childB.maxPos;
-	float xmin = min(min(posBA.x,posBB.x),min(posAA.x,posAB.x));
-	float ymin = min(min(posBA.y,posBB.y),min(posAA.y,posAB.y));
-	float zmin = min(min(posBA.z,posBB.z),min(posAA.z,posAB.z));
-
-	float xmax = max(max(posBA.x,posBB.x),max(posAA.x,posAB.x));
-	float ymax = max(max(posBA.y,posBB.y),max(posAA.y,posAB.y));
-	float zmax = max(max(posBA.z,posBB.z),max(posAA.z,posAB.z));
-
-	minPoint = float3(xmin,ymin,zmin);
-	maxPoint = float3(xmax,ymax,zmax);
-}
-
-bool AABBOverlap(float3 minA, float3 maxA, float3 minB, float3 maxB){
-	 return (minA.x <= maxB.x && maxA.x >= minB.x) &&
-         (minA.y <= maxB.y && maxA.y >= minB.y) &&
-         (minA.z <= maxB.z && maxA.z >= minB.z);
-}
-
-internalNode GetRoot(){
-	return internalNodes[0];
-}
-void TraverseBVHIterative(particle leaf, float radius, out int collisionList[32], int idx){
-	internalNode node = GetRoot();
-	int stack[64];// = { -2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2 };
-
-	for(uint i = 0; i < 64; i++){
-	stack[i] = -2;
-	collisionList[i%32] = -1;
-	}
-
-	int traversalCount = 0;
-	int collisionCount = 0;
-	int maxLoop = 0;
-	bool solved = false;
-	do{
-		if (!solved) {
-			internalNode childA;
-			internalNode childB;
-			GetChildren(node, childA, childB);
-
-			float3 AABBRadius = float3(radius, radius, radius) * angularSpeed;
-			bool overlapA = AABBOverlap(leaf.position - AABBRadius, leaf.position + AABBRadius, childA.minPos, childA.maxPos) && childA.nodeId != -1;
-			bool overlapB = AABBOverlap(leaf.position - AABBRadius, leaf.position + AABBRadius, childB.minPos, childB.maxPos) && childB.nodeId != -1;
-
-
-			if (overlapA && isLeaf(childA) && childA.objectId != idx) {
-				collisionList[collisionCount] = childA.nodeId;
-				collisionCount++;
-			}
-			if (overlapB && isLeaf(childB) && childB.objectId != idx) {
-				collisionList[collisionCount] = childB.nodeId;
-				collisionCount++;
-			}
-
-			bool traverseA = (overlapA && !isLeaf(childA));
-			bool traverseB = (overlapB && !isLeaf(childB));
-
-			if (!traverseA && !traverseB) {
-				stack[traversalCount] = -1;
-				traversalCount--;
-				traversalCount = traversalCount <= 0 ? 0 : traversalCount;
-				if (stack[traversalCount] == -1)
-				{
-					solved = true;
-				}
-				node = internalNodes[stack[traversalCount]];
-			}
-			else {
-				if (traverseA)
-					node = childA;
-				else
-					node = childB;
-
-				if (traverseA && traverseB) {
-					stack[traversalCount] = childB.nodeId;
-					traversalCount++;
-				}
-			}
-		}
-		maxLoop ++;
-	}while(collisionCount < 32 && maxLoop < 64 && traversalCount < 64);//; && collisionCount < 32);//traversing && traversalCount < 64) stack[traversalCount] != -1 && ;
-}
-bool simpleCollision(float3 Q, float3 P, float r){
-float dist = distance(Q,P);
-if(dist < r){
-return true;
-}
-return false;
-}
 
 float3 ApplyVelocity(float3 direction){
 	float c = 0.1;
@@ -223,416 +33,169 @@ float3 Normalize(float3 v) {
 
 float3 calculateCollisionForce(float3 i, float3 j, float k, float diameter, float3 vi, float3 vj, float damping) {
 	float3 repulsiveForce = float3(0, 0, 0);
+    float3 tangentialForce = float3(0, 0, 0);
+    float3 dampingForce = float3(0, 0, 0);
 	float3 rPosition = j - i;
 	float3 rVelocity = vj - vi;
 
-	repulsiveForce = -k * (diameter - length(rPosition)) * (rPosition / length(rPosition));
+    repulsiveForce = -k * (diameter - distance(i,j)) * (Normalize(rPosition));
 
-	float3 dampingForce = (rVelocity) * damping;
-	float3 tangentialForce = rVelocity - dot(rVelocity, Normalize(rPosition)) * Normalize(rPosition);
-	return repulsiveForce + dampingForce + tangentialForce;
+	dampingForce = (rVelocity) * damping;
+	tangentialForce = rVelocity - dot(rVelocity, Normalize(rPosition)) * Normalize(rPosition);
+    return repulsiveForce +dampingForce + tangentialForce;
 }
 
-[numthreads(ThreadX,1,1)]
+#pragma kernel TraversalKernel
+[numthreads(MainKernelThreadX, 1, 1)]
+void TraversalKernel(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID,
+	uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    internalNode leaf = boundingLeafNodes[id.x]; //inputPoints[leafNodes[id.x].objectId];
+    particle curParticle = mergeOutputBuffer[leaf.objectId]; //;mergeOutputBuffer[leaf.objectId];
+    float3 velocity = curParticle.direction;
+    float3 curPoint = curParticle.position;
+    float3 collisionForce = float3(0, 0, 0);
+    float steeringForce = float3(0, 0, 0);
+    int collisionList[] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+    TraverseBVHIterative(leaf, radius, collisionList);
+	[unroll(32)]
+    for (int i = 0; i < 32; i++)
+    {
+        if (collisionList[i] > -1)
+        {
+            particle p = mergeOutputBuffer[collisionList[i]];
+    
+            float dist = distance(curPoint, p.position);
+            if (dist < radius)//  t > 0 && t < 1)// d <= pow(radius*2,2))
+            {
+                float3 c = calculateCollisionForce(curPoint, p.position, 100, radius * 2, velocity, p.direction, 0.1);
+                collisionForce += c;
+            }
+            steeringForce += p.direction * (radius * 4 - distance(curPoint, p.position));
+
+        }
+    }
+    if (curPoint.y < 0 + radius)
+    {
+        collisionForce += calculateCollisionForce(curPoint, float3(curPoint.x, 0 + radius, curPoint.z), 100, radius * 2, velocity, float3(0, 1, 0), 0.1);
+    }
+
+    float3 force = collisionForce + gravityVec * gravity * 0.25 + steeringForce;
+    float3 acceleration = force / 0.25;
+	//acceleration *= DeltaTime;
+    velocity = velocity + acceleration * DeltaTime; // +collisionForce;
+
+    velocityBuffer[leaf.objectId] = velocity;
+
+}
+
+
+#pragma kernel CSMain
+[numthreads(MainKernelThreadX, 1, 1)]
 void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
 	uint3 GTid : SV_GroupThreadID,
 	uint  GI : SV_GroupIndex)
 {
-	particle curParticle = mergeOutputBuffer[leafNodes[id.x].objectId]; //inputPoints[leafNodes[id.x].objectId];
-	AllMemoryBarrierWithGroupSync();
-	
-	float3 velocity = curParticle.direction;
+    internalNode leaf = boundingLeafNodes[id.x]; //inputPoints[leafNodes[id.x].objectId];
+    particle curParticle = mergeOutputBuffer[leaf.objectId]; //;mergeOutputBuffer[leaf.objectId];
+    float3 velocity = velocityBuffer[leaf.objectId];
 	float3 curPoint = curParticle.position;
-	float3 collisionForce = float3(0, 0, 0);
+	//float3 collisionForce = float3(0, 0, 0);
+    //
+    //
+	//int collisionList[] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
+    //TraverseBVHIterative(leaf, radius, collisionList);
+	//[unroll(32)]
+	//for (int i = 0; i < 32; i++) {
+	//	if (collisionList[i] > -1) {
+	//		particle p = mergeOutputBuffer[collisionList[i]];
+    //
+    //        float dist = distance(curPoint, p.position);
+	//		if (dist < radius)//  t > 0 && t < 1)// d <= pow(radius*2,2))
+	//		{
+    //            float3 c = calculateCollisionForce(curPoint, p.position, 1500, radius*2, velocity, p.direction, 20);
+	//			collisionForce += c;
+	//		}
+	//	}
+	//}
+    //if (curPoint.y < 0 + radius)
+    //{
+    //    collisionForce += calculateCollisionForce(curPoint, float3(curPoint.x, 0 + radius, curPoint.y), 10, radius * 2, velocity, float3(0, 1, 0), 20);
+    //}
+    //
+    //
+	//float3 force = collisionForce + gravityVec * 1 * gravity;
+	//float3 acceleration = force / 1;
+	////acceleration *= DeltaTime;
+	//velocity = velocity + acceleration * DeltaTime;// +collisionForce;
+    if (curPoint.x > 0.5 - radius)
+    {
+        curPoint.x = 0.5 - radius;
+        velocity.x *= -1;
+    }
+    else if (curPoint.x < 0 + radius)
+    {
+        curPoint.x = 0 + radius;
+        velocity.x *= -1;
+    }
+	
+    if (curPoint.y > 1 - radius)
+    {
+        curPoint.y = 1 - radius;
+        velocity.y *= -1;
+    }
+	//else if(curPoint.y < 0 + radius){
+	//curPoint.y = 0 + radius;
+	//velocity.y *=-1;
+	//}
+	
+    if (curPoint.z > 0.5 - radius)
+    {
+        curPoint.z = 0.5 - radius;
+        velocity.z *= -1;
+    }
+    else if (curPoint.z < 0 + radius)
+    {
+        curPoint.z = 0 + radius;
+        velocity.z *= -1;
+    }
 
-
-	int collisionList[] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
-	TraverseBVHIterative(curParticle, radius, collisionList, id.x);
-	[unroll(32)]
-	for (int i = 0; i < 32; i++) {
-		if (collisionList[i] > -1) {
-			particle p = mergeOutputBuffer[collisionList[i]];
-
-			float dist = distance(curParticle.position, p.position);
-			if (dist < radius)//  t > 0 && t < 1)// d <= pow(radius*2,2))
-			{
-				float3 c = calculateCollisionForce(curParticle.position, p.position, 250, radius*2, velocity, p.direction, 20);
-				collisionForce += c;
-			}
-		}
-	}
-	float3 force = collisionForce + gravityVec * 1 * gravity;
-	float3 acceleration = force / 1;
-	acceleration *= DeltaTime;
-	velocity = velocity + acceleration * DeltaTime;// +collisionForce;
 	curPoint = curPoint + velocity * DeltaTime * speed;
-	DeviceMemoryBarrier();
 
-	if(curPoint.x > 1 - radius){
-	curPoint.x =  1 - radius;
-	velocity.x *=-1;
-	}else if(curPoint.x < 0 + radius){
-	curPoint.x = 0 + radius;
-	velocity.x *=-1;
-	}
 	
-	if(curPoint.y > 1 - radius){
-	curPoint.y =  1 - radius;
-	velocity.y *=-1;
-	}else if(curPoint.y < 0 + radius){
-	curPoint.y = 0 + radius;
-	velocity.y *=-1;
-	}
-	
-	if(curPoint.z >  1 - radius){
-	curPoint.z =  1 - radius;
-	velocity.z *=-1;
-	}else if(curPoint.z < 0 + radius){
-	curPoint.z = 0 + radius;
-	velocity.z *=-1;
-	}
-	inputPoints[id.x].direction = velocity;
-	inputPoints[id.x].position = curPoint;
-	inputPoints[id.x].mortonId = morton3D(curPoint.x,curPoint.y,curPoint.z);
-	inputPoints[id.x].radius = radius;
-	DeviceMemoryBarrier();
+    curParticle.direction = velocity;
+    curParticle.position = curPoint;
+    curParticle.mortonId = morton3D(curPoint.x, curPoint.y, curPoint.z);
+    curParticle.radius = radius;
+    inputPoints[id.x] = curParticle;
+	//DeviceMemoryBarrier();
 }
 
-//LVBH Construction From here on
-//Count leading zeros method
-int clz1( uint x )
-{
-  int n;
-  if (x == 0) return 32;
 
-  for (n = 0; ((x & 0x80000000) == 0); n++, x <<= 1);
-  return n;
-}
-int clz3(uint x){
-	if (x == 0){ 
-	return 32;
-	}
-
-    uint n = 0;
-    if ((x & 0xFFFF0000) == 0){ 
-	n = n + 16;  
-	x = x << 16;
-	}
-    if ((x & 0xFF000000) == 0){ 
-	n = n +  8;
-	x = x <<  8;
-	}
-    if ((x & 0xF0000000) == 0) {n = n +  4;  x = x <<  4;}
-    if ((x & 0xC0000000) == 0) {n = n +  2;  x = x <<  2;}
-    if ((x & 0x80000000) == 0) {n = n +  1;}
-    return n;
-}
-//Deeper Hierarchy functions:
-int findSplit(int first, int last)
-{
-    uint firstCode = boundingLeafNodes[first].mortonId;
-    uint lastCode = boundingLeafNodes[last].mortonId;
-    
-    //When morton codes are identical we want to return the first id
-    //because if we split it in the middle, both will try to orientate
-    //towards the same direction
-    
-    //to split it in the middle would be the best but since it would be harder
-    //for the range detector we do it this way (both ways less instructions needed:
-    //here: (first + last) >> 1 to "first" and
-    //in determine range we can reduce it to seek forward instead of tetermining the
-    //sub direction and stuff...
-    if (firstCode == lastCode)
-        //return (first + last) >> 1;
-      return first;
-	
-    // Calculate the number of highest bits that are the same
-    // for all objects, using the count-leading-zeros intrinsic.
-    int commonPrefix = clz3(firstCode ^ lastCode);
-
-    // Use binary search to find where the next bit differs.
-    // Specifically, we are looking for the highest object that
-    // shares more than commonPrefix bits with the first one.
-
-    int split = first; // initial guess
-    int step = last - first;
-    do
-    {
-        step = (step + 1) >> 1; // exponential decrease
-        int newSplit = split + step; // proposed new position
-
-        if (newSplit < last)
-        {
-            uint splitCode = boundingLeafNodes[newSplit].mortonId;
-            int splitPrefix = clz3(firstCode ^ splitCode);
-            if (splitPrefix > commonPrefix)
-                split = newSplit; // accept proposal
-        }
-    }
-    while (step > 1);
-
-    return split;
-}
-int2 determineRange(int index)
-{
-  //so we don't have to call it every time
-  uint lso, stride;
-  mergeOutputBuffer.GetDimensions(lso,stride);
-  //uint lso = 1024;
-  lso = lso-1;
-  //tadaah, it's the root node
-  if(index == 0)
-    return int2( 0, lso);
-  //direction to walk to, 1 to the right, -1 to the left
-  int dir;
-  //morton code diff on the outer known side of our range ... diff mc3 diff mc4 ->DIFF<- [mc5 diff mc6 diff ... ] diff .. 
-  int d_min;
-  int initialindex = index;
-  
-  uint minone = boundingLeafNodes[index-1].mortonId;
-  uint precis = boundingLeafNodes[index].mortonId;
-  uint pluone = boundingLeafNodes[index+1].mortonId;
-
-  //AllMemoryBarrierWithGroupSync();
-  //GroupMemoryBarrierWithGroupSync();
-
-  if((minone == precis && pluone == precis))
-  {
-    //set the mode to go towards the right, when the left and the right
-    //object are being the same as this one, so groups of equal
-    //code will be processed from the left to the right
-    //and in node order from the top to the bottom, with each node X (ret.x = index)
-    //containing Leaf object X and nodes from X+1 (the split func will make this split there)
-    //till the end of the groups
-    //(if any bit differs... DEP=32) it will stop the search
-    while(index > 0 && index < lso )
-    {
-       //move one step into our direction
-       index += 1;
-       if(index >= lso){
-       //we hit the left end of our list
-	 	break;
-	 	}
-	  
-      if(boundingLeafNodes[index].mortonId != boundingLeafNodes[index+1].mortonId){
-       //there is a diffrence
-	 	break;
-	 	}
-    }
-    //return the end of equal grouped codes
-    return int2(initialindex,index);
-}else{
-    //Our codes differ, so we seek for the ranges end in the binary search fashion:
-    int2 lr= int2(clz3(precis ^ minone),clz3(precis ^ pluone));
-    //now check wich one is higher (codes put side by side and wrote from up to down)
-      if(lr.x > lr.y)
-      {//to the left, set the search-depth to the right depth
-	dir = -1;
-	d_min = lr.y;
-      }else{//to the right, set the search-depth to the left depth
-	dir = 1;
-	d_min = lr.x;
-      }
-    }
-    //Now look for an range to search in (power of two)
-    int l_max = 2;
-    //so we don't have to calc it 3x
-    int testindex = index + l_max*dir;
-    while((testindex<=lso&&testindex>=0)?(clz3(precis ^ boundingLeafNodes[testindex].mortonId)>d_min):(false))
-    {
-		l_max *= 2;testindex = index + l_max*dir;
-	}
-	
-    int l = 0;
-    //go from l_max/2 ... l_max/4 ... l_max/8 .......... 1 all the way down
-    for(uint div = 2 ; l_max / div >= 1 ; div *= 2){
-      //calculate the ofset state
-        int t = l_max/div;
-	//calculate where to test next
-        int newTest = index + (l + t)*dir;
-	//test if in code range
-        if (newTest <= lso && newTest >= 0)
-        {
-            int splitPrefix = clz3(precis ^ boundingLeafNodes[newTest].mortonId);
-	    //and if the code is higher then our minimum, update the position
-            if (splitPrefix > d_min)
-	    l = l+t;
-        }
-    }
-    //now give back the range (in the right order, [lower|higher])
-    if(dir==1)
-      return int2(index,index + l*dir);
-    else
-      return int2(index + l*dir,index);
-	return int2(0,0);
-}
 #pragma kernel WriteNodeData
 [numthreads(ThreadX, 1, 1)]
 void WriteNodeData(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
 	uint  GI : SV_GroupIndex)
 {
-	boundingLeafNodes[id.x].parentId = -1;
-	boundingLeafNodes[id.x].objectId = id.x;
-	boundingLeafNodes[id.x].nodeId = id.x;
-	boundingLeafNodes[id.x].mortonId = mergeOutputBuffer[id.x].mortonId;
-	boundingLeafNodes[id.x].minPos = mergeOutputBuffer[id.x].position - float3(radius, radius, radius) / 2;
-	boundingLeafNodes[id.x].maxPos = mergeOutputBuffer[id.x].position + float3(radius, radius, radius) / 2;
-	boundingLeafNodes[id.x].sRadius = radius;
-	boundingInternalNodes[id.x].parentId = -1;
-	boundingInternalNodes[id.x].objectId = -1;
-	boundingInternalNodes[id.x].visited = 0;
-	boundingInternalNodes[id.x].nodeId = id.x;
-
-	//boundingInternalNodes[id.x] = internalNodes[id.x];
-	//boundingLeafNodes[id.x] = leafNodes[id.x];
-}
-
-RWStructuredBuffer<int> indexBuffer;
-//if Neccesarry recursively until two arrays remain
-//Step two for each array pair execute parrallel merge
-//This includes every thread performing a binary search on their paired arrays.
-//Finding a value smaller than itself and summing the indices of the pair +1 to find the destination index
-// if no value found then no change to index, if largest value and largest index no change to index.
-//This results in a single array, which up the recursion tree is then paired with a merged array from a different leaf.
-//Process continues until i have one continous sorted array. Algorithm should have log(k)*n*(log(n)) running time 
-#pragma kernel CSCreateBVH
-
-[numthreads(ThreadX,1,1)]
-void CSCreateBVH (uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
-	uint  GI : SV_GroupIndex)
-{
-	//AllMemoryBarrier();
-	//int index = id.x;
-	////index = id.x;
-	//
-	//GroupMemoryBarrier();
-	//boundingLeafNodes[index].parentId = -1;
-	//boundingLeafNodes[index].objectId = id.x;
-	//boundingLeafNodes[index].nodeId = index;
-	//boundingLeafNodes[index].mortonId = mergeOutputBuffer[id.x].mortonId;
-	//boundingLeafNodes[index].minPos = mergeOutputBuffer[id.x].position -float3(radius, radius, radius) / 2;
-	//boundingLeafNodes[index].maxPos = mergeOutputBuffer[id.x].position +float3(radius, radius, radius) / 2;
-	//boundingLeafNodes[index].sRadius = radius;
-	//boundingInternalNodes[id.x].parentId = -1;
-	//boundingInternalNodes[id.x].objectId = -1;
-	//boundingInternalNodes[id.x].visited = 0;
-	//boundingInternalNodes[id.x].nodeId = id.x;
-	//DeviceMemoryBarrier();
-
-	int2 inrange = determineRange(id.x);
-	int first = inrange.x;
-
-	int last = inrange.y;
-	indexBuffer[id.x] = first;
-
-	int split = findSplit(first,last);
-
-	int2 leaves;
-	int2 intNodes;
+    inputPoints[id.x] = mergeOutputBuffer[id.x];
+    internalNode leaf = leafNodes[id.x];
+	leaf.parentId = -1;
+	leaf.objectId = id.x;
+	leaf.nodeId = id.x;
+	leaf.mortonId = mergeOutputBuffer[id.x].mortonId;
+	leaf.minPos = mergeOutputBuffer[id.x].position - float3(radius, radius, radius) / 2;
+	leaf.maxPos = mergeOutputBuffer[id.x].position + float3(radius, radius, radius) / 2;
+    leaf.sRadius = radius;
 	
-	DeviceMemoryBarrier();
+    leafNodes[id.x] = leaf;
+    boundingLeafNodes[id.x] = leaf;
 
-	if(split == first){
-		leaves.x = split;
-		leafNodes[split].parentId = id.x;
-		intNodes.x = -1;
-	}
-	else{
-		intNodes.x = split;
-		internalNodes[split].parentId = id.x;
-		leaves.x = -1;
-	}
-	AllMemoryBarrier();
-	if(split +1 == last){
-		leaves.y = split +1;
-		leafNodes[split + 1].parentId = id.x;
-		intNodes.y = -1;
-	}
-	else{
-		intNodes.y = split +1;
-		internalNodes[split + 1].parentId = id.x;
-		leaves.y = -1;
-	}
-
-	//if (internalNodes[id.x].parentId == -1) {
-	//	intNodes = float2(0, 511);
-	//}
-
-	AllMemoryBarrier();
-	internalNodes[id.x].leaves = leaves;
-	internalNodes[id.x].bLeaves = leaves;
-	internalNodes[id.x].intNodes = intNodes;
-	DeviceMemoryBarrier();
-
-}	
-
-#pragma kernel CSGenerateBoundingSpheres
-groupshared int parents[ThreadX];
-[numthreads(ThreadX,1,1)]
-void CSGenerateBoundingSpheres(uint3 id: SV_DISPATCHTHREADID , uint3 GTid : SV_GroupThreadID,
-	uint GI : SV_GroupIndex){
-	int parentId = leafNodes[id.x].parentId;
-	parents[GI] = parentId;
-	AllMemoryBarrierWithGroupSync();
-	int traversalCount = 0;
-	uint count;
-	uint stride;
-	mergeOutputBuffer.GetDimensions(count, stride);
-	internalNode parent;
-	bool solved = false;
-	int counter = 0;
-	//InterlockedAdd(leafNodes[parentId].visited, 1);
-
-	while (parentId != -1) {
-		//InterlockedAdd(internalNodes[parentId].visited, 1);
-		//if (internalNodes[parentId].visited > 2) {
-		//	break;
-		//}
-		//DeviceMemoryBarrier();
-
-		parent = internalNodes[parentId];
-		float3 Min;
-		float3 Max;
-		CalculateAABB(parent, Min, Max);
-		//AllMemoryBarrierWithGroupSync();
-		internalNode ChildA;
-		internalNode ChildB;
-		GetChildren(parent, ChildA, ChildB);
-		//AllMemoryBarrierWithGroupSync();
-
-		int2 bLeaves = parent.bLeaves;
-		if (isLeaf(ChildA)) { //&& parent.bLeaves.x > ChildA.nodeId
-			bLeaves.x = ChildA.nodeId;
-		}
-		else {
-			bLeaves.x = ChildA.bLeaves.x;
-		}
-		if (isLeaf(ChildB)) {// && parent.bLeaves.y < ChildB.nodeId
-			bLeaves.y = ChildB.nodeId;
-		}
-		else {
-			bLeaves.y = ChildB.bLeaves.y;
-		}
-
-		//parent = CalculateBoundingSphere(parent);
-		//int original;
-		//InterlockedExchange(boundingInternalNodes[parentId].bLeaves.x, bLeaves.x, original);
-		//InterlockedExchange(boundingInternalNodes[parentId].bLeaves.y, bLeaves.y, original);
-		//float3 original;
-		//InterlockedExchange(internalNodes[parentId].minPos, Min, original);
-		//InterlockedExchange(internalNodes[parentId].maxPos, Max, original);
-
-		internalNodes[parentId].bLeaves = bLeaves;
-		internalNodes[parentId].minPos = Min;
-		internalNodes[parentId].maxPos = Max;
-
-		DeviceMemoryBarrier();
-
-		parentId = parent.parentId;
-		counter++;
-	}
-	AllMemoryBarrierWithGroupSync();
 }
+
+
+
+
 
 #pragma kernel CSSortMortonIDs
 [numthreads(ThreadX,1,1)]
@@ -645,76 +208,4 @@ void CSSortMortonIDs (uint3 id : SV_DispatchThreadID)
 }
 
 
-#pragma kernel Merge
-groupshared int searchIDs[ThreadX];
-groupshared int GIRanks[ThreadX];
-int BinarySearch(uint idx, uint mortonCode, uint GI, int offset, int count) {
 
-	int iddx = idx;
-
-	int rank = GIRanks[GI];
-
-	int center = ThreadX / 2;
-	int maxLoop = 0;
-	int index = center - 1;
-
-	searchIDs[GI] = inputPoints[(iddx + (ThreadX * offset)) % count].mortonId;
-	GroupMemoryBarrierWithGroupSync();
-
-	float stepScale = 0.25;
-	int direction = 0;
-
-	maxLoop = 0;
-	bool solved = false;
-	do
-	{
-		index += direction;
-
-		int middle = searchIDs[index];
-		int pluOne = searchIDs[index + 1];
-
-		if (pluOne == 0 && middle < mortonCode && !solved) {
-			rank = rank + index + 1;
-			solved = true;
-		}
-
-		if (middle < mortonCode && pluOne > mortonCode && !solved) {
-			rank = rank + index + 1;
-			solved = true;
-		}
-
-		if ((ThreadX)*stepScale < 1 && middle < mortonCode && pluOne < mortonCode && !solved) {
-			rank = rank + index + 2;
-			solved = true;
-		}
-
-		if (middle > mortonCode) {
-			direction = (int)(-1 * (ThreadX)*stepScale);
-			stepScale = stepScale * 0.5;
-		}
-		if (pluOne < mortonCode) {
-			direction = (int)(1 * (ThreadX)*stepScale);
-			stepScale = stepScale * 0.5;
-		}
-		maxLoop++;
-	} while (maxLoop < log2(ThreadX));// (int)(arraySize*stepScale) > 0);
-	return rank;
-}
-
-[numthreads(ThreadX, 1, 1)]
-void Merge(uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
-{
-	uint current = inputPoints[DTid.x].mortonId;
-	GIRanks[GI] = GI;
-	AllMemoryBarrierWithGroupSync();
-	uint count, stride;
-	inputPoints.GetDimensions(count, stride);
-	int groupAmount = count / ThreadX;
-	for (int i = 1; i < groupAmount; i++)
-	{
-		GIRanks[GI] = BinarySearch(DTid.x, current, GI, i, count);
-		GroupMemoryBarrierWithGroupSync();
-	}
-	mergeOutputBuffer[GIRanks[GI]] = inputPoints[DTid.x];
-	AllMemoryBarrierWithGroupSync();
-}
