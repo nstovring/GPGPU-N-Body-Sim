@@ -4435,7 +4435,7 @@ MonoBehaviour:
   speed: 1
   angularSpeed: 1
   gravityMul: 1
-  diameter: 0.013
+  diameter: 0.031
   gravityVec: {x: 0, y: -1.07, z: 0}
   cubeMesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
   instanceMaterial: {fileID: 2100000, guid: 1cd3f0037b6662b44aa7105e8aa0b583, type: 2}
@@ -4451,6 +4451,7 @@ MonoBehaviour:
   visualizeHeirarchy: 0
   heirarchyLeaf: 0
   visualizeBVHTree: 0
+  showVelocities: 0
   treeScale: 0.55
   currentCollisions: 0
 --- !u!81 &2130259646

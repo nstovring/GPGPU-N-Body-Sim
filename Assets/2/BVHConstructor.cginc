@@ -107,6 +107,7 @@ int2 determineRange(int index)
     int d_min;
     int initialindex = index;
   
+
     uint minone = leafNodes[index - 1].mortonId;
     uint precis = leafNodes[index].mortonId;
     uint pluone = leafNodes[index + 1].mortonId;

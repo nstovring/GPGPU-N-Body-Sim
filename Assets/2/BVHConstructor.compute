@@ -14,13 +14,13 @@ void CSCreateBVH(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     if (id.x >= count)
         return;
 
-    internalNode intNode = internalNodes[id.x];
-    intNode.parentId = -1;
-    intNode.objectId = -1;
-    intNode.visited = 0;
-    intNode.nodeId = id.x;
-    internalNodes[id.x] = intNode;
-    boundingInternalNodes[id.x] = intNode;
+    //internalNode intNode = internalNodes[id.x];
+    //intNode.parentId = -1;
+    //intNode.objectId = -1;
+    //intNode.visited = 0;
+    //intNode.nodeId = id.x;
+    //internalNodes[id.x] = intNode;
+    //boundingInternalNodes[id.x] = intNode;
 
     //intNode.parentId = -1;
     //intNode.objectId = -1;
@@ -44,53 +44,66 @@ void CSCreateBVH(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     float3 aMax;
     float3 bMin;
     float3 bMax;
-   
+    
+    internalNode ChildA;
+    internalNode ChildB;
 
     if (split == first)
     {
         leaves.x = split;
-        boundingLeafNodes[split].parentId = id.x;
-        aMin = boundingLeafNodes[split].minPos;
-        aMax = boundingLeafNodes[split].maxPos;
-
+        //boundingLeafNodes[split].parentId = id.x;
+        ChildA = boundingLeafNodes[split];
         intNodes.x = -1;
     }
     else
     {
         intNodes.x = split;
-        boundingInternalNodes[split].parentId = id.x;
+        //boundingInternalNodes[split].parentId = id.x;
+        ChildA = boundingInternalNodes[split];
         leaves.x = -1;
-        aMin = boundingLeafNodes[first].minPos;
-        aMax = boundingLeafNodes[first].maxPos;
 
     }
     if (split + 1 == last)
     {
         leaves.y = split + 1;
-        boundingLeafNodes[split + 1].parentId = id.x;
+        //boundingLeafNodes[split + 1].parentId = id.x;
+        ChildB = boundingLeafNodes[split + 1];
+
         intNodes.y = -1;
-        bMin = boundingLeafNodes[leaves.y].minPos;
-        bMax = boundingLeafNodes[leaves.y].maxPos;
     }
     else
     {
         intNodes.y = split + 1;
-        boundingInternalNodes[split + 1].parentId = id.x;
+        //boundingInternalNodes[split + 1].parentId = id.x;
+        ChildB = boundingInternalNodes[split + 1];
         leaves.y = -1;
-        bMin = boundingLeafNodes[first].minPos;
-        bMax = boundingLeafNodes[last].maxPos;
     }
     
-    float3 Max;
-    float3 Min;
-    CalculateAABB(aMin, aMax, bMin, bMax, Min, Max);
 
     DeviceMemoryBarrier();
+
+    if (isLeaf(ChildA))
+    {
+        boundingLeafNodes[ChildA.nodeId].parentId = id.x;
+    }
+    else
+    {
+        boundingInternalNodes[ChildA.nodeId].parentId = id.x;
+    }
+
+    if (isLeaf(ChildB))
+    {
+        boundingLeafNodes[ChildB.nodeId].parentId = id.x;
+    }
+    else
+    {
+        boundingInternalNodes[ChildB.nodeId].parentId = id.x;
+    }
+
+
     internalNode node = boundingInternalNodes[id.x];
     node.leaves = leaves;
     node.bLeaves = inrange;
-    node.minPos = Min;
-    node.maxPos = Max;
     node.intNodes = intNodes;
     boundingInternalNodes[id.x] = node;
     internalNodes[id.x] = node;

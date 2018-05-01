@@ -22,7 +22,7 @@ public class BufferSorter : MonoBehaviour
     //const int count = 10554096;
     private int cachedInstanceCount = -1;
 
-    public const int count = 32768;
+    public const int count = 256;//32768;
     const int groupSize = 256;
     const int mainKernelGroupSize = 32;
     int groupAmount = count / groupSize;
@@ -269,6 +269,7 @@ public class BufferSorter : MonoBehaviour
         Debug.Log(name + " :  " + values + "\n" );
     }
 
+    [Header("Debug")]
     public bool checkSorted = false;
     public float GizmoPosScale = 1;
     public float GizmoScale = 1;
@@ -287,7 +288,7 @@ public class BufferSorter : MonoBehaviour
     public int heirarchyLeaf = 0;
 
     public bool visualizeBVHTree = false;
-
+    public bool showVelocities = false;
     [Range(0, 2)]
     public float treeScale = 0.55f;
     public int currentCollisions = 0;
@@ -297,20 +298,20 @@ public class BufferSorter : MonoBehaviour
         boundingInternalNodeBuffer.GetData(nodeData);
         boundingLeafNodeBuffer.GetData(leafData);
         mergeOutputBuffer.GetData(particleData);
-        //PhysicsDebugger.ShowVelocities(ref particleData);
+        if(showVelocities)
+        PhysicsDebugger.ShowVelocities(ref particleData);
         if (visualizeHeirarchy)
         {
             PhysicsDebugger.FindRoot(ref leafData, ref nodeData, ref particleData, heirarchyLeaf);
         }
         else if (visualizeBoundingBoxes)
         {
-            PhysicsDebugger.VisualizeBoundingBoxes(ref nodeData, boundingBoxMin);
+            PhysicsDebugger.VisualizeBoundingBoxes(ref nodeData, ref leafData, boundingBoxMin);
         }
         else if (visualizePotentialCollisions)
         {
             PhysicsDebugger.VisualisePotentialCollisions(ref leafData, ref nodeData, ref particleData, heirarchyLeafToCheckForCollision, diameter);
         }
-
 
         if (visualizeBVHTree)
         {

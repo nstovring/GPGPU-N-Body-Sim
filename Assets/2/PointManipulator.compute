@@ -56,7 +56,7 @@ void TraversalKernel(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID,
     float3 velocity = curParticle.direction;
     float3 curPoint = curParticle.position;
     float3 collisionForce = float3(0, 0, 0);
-    float steeringForce = float3(0, 0, 0);
+    float3 steeringForce = float3(0, 0, 0);
     int collisionList[] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
     TraverseBVHIterative(leaf, radius, collisionList);
 	[unroll(32)]
@@ -69,20 +69,20 @@ void TraversalKernel(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID,
             float dist = distance(curPoint, p.position);
             if (dist < radius)//  t > 0 && t < 1)// d <= pow(radius*2,2))
             {
-                float3 c = calculateCollisionForce(curPoint, p.position, 100, radius * 2, velocity, p.direction, 0.1);
+                float3 c = calculateCollisionForce(curPoint, p.position, 200, radius * 2, velocity, p.direction, 0.1);
                 collisionForce += c;
             }
-            steeringForce += p.direction * (radius * 4 - distance(curPoint, p.position));
+            steeringForce += p.direction * (radius * 2 - distance(curPoint, p.position));
 
         }
     }
     if (curPoint.y < 0 + radius)
     {
-        collisionForce += calculateCollisionForce(curPoint, float3(curPoint.x, 0 + radius, curPoint.z), 100, radius * 2, velocity, float3(0, 1, 0), 0.1);
+        collisionForce += calculateCollisionForce(curPoint, float3(curPoint.x, 0 + radius, curPoint.z), 200, radius * 2, velocity, float3(0, 1, 0), 1);
     }
 
-    float3 force = collisionForce + gravityVec * gravity * 0.25 + steeringForce;
-    float3 acceleration = force / 0.25;
+    float3 force = collisionForce + gravityVec * gravity * 1 + steeringForce;
+    float3 acceleration = force /1;
 	//acceleration *= DeltaTime;
     velocity = velocity + acceleration * DeltaTime; // +collisionForce;
 
@@ -101,37 +101,10 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
     particle curParticle = mergeOutputBuffer[leaf.objectId]; //;mergeOutputBuffer[leaf.objectId];
     float3 velocity = velocityBuffer[leaf.objectId];
 	float3 curPoint = curParticle.position;
-	//float3 collisionForce = float3(0, 0, 0);
-    //
-    //
-	//int collisionList[] = { -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1 };
-    //TraverseBVHIterative(leaf, radius, collisionList);
-	//[unroll(32)]
-	//for (int i = 0; i < 32; i++) {
-	//	if (collisionList[i] > -1) {
-	//		particle p = mergeOutputBuffer[collisionList[i]];
-    //
-    //        float dist = distance(curPoint, p.position);
-	//		if (dist < radius)//  t > 0 && t < 1)// d <= pow(radius*2,2))
-	//		{
-    //            float3 c = calculateCollisionForce(curPoint, p.position, 1500, radius*2, velocity, p.direction, 20);
-	//			collisionForce += c;
-	//		}
-	//	}
-	//}
-    //if (curPoint.y < 0 + radius)
-    //{
-    //    collisionForce += calculateCollisionForce(curPoint, float3(curPoint.x, 0 + radius, curPoint.y), 10, radius * 2, velocity, float3(0, 1, 0), 20);
-    //}
-    //
-    //
-	//float3 force = collisionForce + gravityVec * 1 * gravity;
-	//float3 acceleration = force / 1;
-	////acceleration *= DeltaTime;
-	//velocity = velocity + acceleration * DeltaTime;// +collisionForce;
-    if (curPoint.x > 0.5 - radius)
+
+    if (curPoint.x > 1 - radius)
     {
-        curPoint.x = 0.5 - radius;
+        curPoint.x = 1 - radius;
         velocity.x *= -1;
     }
     else if (curPoint.x < 0 + radius)
@@ -150,9 +123,9 @@ void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
 	//velocity.y *=-1;
 	//}
 	
-    if (curPoint.z > 0.5 - radius)
+    if (curPoint.z > 1 - radius)
     {
-        curPoint.z = 0.5 - radius;
+        curPoint.z = 1 - radius;
         velocity.z *= -1;
     }
     else if (curPoint.z < 0 + radius)
@@ -190,6 +163,19 @@ void WriteNodeData(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID
 	
     leafNodes[id.x] = leaf;
     boundingLeafNodes[id.x] = leaf;
+
+    uint count, stride;
+    boundingInternalNodes.GetDimensions(count, stride);
+    if (id.x >= count)
+        return;
+
+    internalNode intNode = internalNodes[id.x];
+    intNode.parentId = -1;
+    intNode.objectId = -1;
+    intNode.visited = 0;
+    intNode.nodeId = id.x;
+    internalNodes[id.x] = intNode;
+    boundingInternalNodes[id.x] = intNode;
 
 }
 

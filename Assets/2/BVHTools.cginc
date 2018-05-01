@@ -109,45 +109,8 @@ void SetIntNodeParent(int nodeindex, int parentIndex)
 }
 
 
-void CalculateAABB(internalNode node, out float3 minPoint, out float3 maxPoint)
-{
 
-    internalNode childA;
-    internalNode childB;
-    GetChildren(node, childA, childB);
-    float3 posAA = childA.minPos;
-    float3 posAB = childA.maxPos;
-    float3 posBA = childB.minPos;
-    float3 posBB = childB.maxPos;
-    float xmin = min(min(posBA.x, posBB.x), min(posAA.x, posAB.x));
-    float ymin = min(min(posBA.y, posBB.y), min(posAA.y, posAB.y));
-    float zmin = min(min(posBA.z, posBB.z), min(posAA.z, posAB.z));
 
-    float xmax = max(max(posBA.x, posBB.x), max(posAA.x, posAB.x));
-    float ymax = max(max(posBA.y, posBB.y), max(posAA.y, posAB.y));
-    float zmax = max(max(posBA.z, posBB.z), max(posAA.z, posAB.z));
-
-    minPoint = float3(xmin, ymin, zmin);
-    maxPoint = float3(xmax, ymax, zmax);
-}
-
-void CalculateAABB(float3 inMinA, float3 inMaxA, float3 inMinB, float3 inMaxB, out float3 minPoint, out float3 maxPoint)
-{
-    float3 posAA = inMinA;
-    float3 posAB = inMaxA;
-    float3 posBA = inMinB;
-    float3 posBB = inMaxB;
-    float xmin = min(min(posBA.x, posBB.x), min(posAA.x, posAB.x));
-    float ymin = min(min(posBA.y, posBB.y), min(posAA.y, posAB.y));
-    float zmin = min(min(posBA.z, posBB.z), min(posAA.z, posAB.z));
-
-    float xmax = max(max(posBA.x, posBB.x), max(posAA.x, posAB.x));
-    float ymax = max(max(posBA.y, posBB.y), max(posAA.y, posAB.y));
-    float zmax = max(max(posBA.z, posBB.z), max(posAA.z, posAB.z));
-
-    minPoint = float3(xmin, ymin, zmin);
-    maxPoint = float3(xmax, ymax, zmax);
-}
 
 bool AABBOverlap(float3 minA, float3 maxA, float3 minB, float3 maxB)
 {

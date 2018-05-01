@@ -91,6 +91,7 @@ public static class PhysicsDebugger {
             childA = nodeData[intNodes.x];
         if (intNodes.y != -1)
             childB = nodeData[intNodes.y];
+
     }
 
 
@@ -195,24 +196,47 @@ public static class PhysicsDebugger {
     public static float GizmoPosScale;
     public static float GizmoScale;
 
-    public static void VisualizeBoundingBoxes(ref internalNode[] nodeData, int boundingBoxMin)
+    public static void VisualizeBoundingBoxes(ref internalNode[] nodeData, ref internalNode[] leafData, int boundingBoxMin)
     {
-
-        for (int i = boundingBoxMin; i < nodeData.Length; i++)
+        //CreateBoundingBoxes(ref nodeData,ref leafData);
+        sortedNodeData = new List<internalNode>();
+        DrawBoundingRecursive(nodeData[0], ref nodeData, ref leafData);
+        Vector3 offset = Vector3.zero;
+        Vector3 scale = Vector3.zero;
+     
+        for (int i = boundingBoxMin; i < sortedNodeData.Count; i++)
         {
-            internalNode node = nodeData[i];
+            internalNode node = sortedNodeData[i];
+            offset += new Vector3(scale.x, 0, 0);
             //Gizmos.color =  Color.white * (node.overlap);
-            Vector3 center = (node.minPos + node.maxPos) / 2;
-            Vector3 scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
+            Vector3 center = (node.minPos + node.maxPos) / 2 + offset;
+            scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
             Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
         }
     }
 
-    public static void VisualizeBVHTree(ref internalNode[] nodeData, ref internalNode[] leafData, float treeScale)
+   
+    static List<internalNode> sortedNodeData;
+    static void DrawBoundingRecursive(internalNode node,ref internalNode[] nodeData, ref internalNode[] leafData)
     {
-        internalNode root = nodeData[0];
-        DrawNode(root, Vector3.zero);
-        DrawTreeRecursive(root, Vector3.zero, 2f * treeScale, ref nodeData, ref leafData);
+        sortedNodeData.Add(node);
+        internalNode ChildA;
+        internalNode ChildB;
+
+        //Vector3 center = (node.minPos + node.maxPos) / 2;
+        //Vector3 scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
+        //Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
+
+        GetNodeChildren(node, out ChildA, out ChildB, ref leafData, ref nodeData);
+        //Debug.DrawLine(origin, origin + new Vector3(-2 * scale, -1, 2));
+        //Debug.DrawLine(origin, origin + new Vector3(2 * scale, -1, -2));
+        //DrawNode(ChildA, origin + new Vector3(-2 * scale, -1, 2));
+        //DrawNode(ChildB, origin + new Vector3(2 * scale, -1, -2));
+
+        if (!isLeaf(ChildA))
+            DrawBoundingRecursive(ChildA, ref nodeData, ref leafData);
+        if (!isLeaf(ChildB))
+            DrawBoundingRecursive(ChildB, ref nodeData, ref leafData);
     }
 
     static void DrawTreeRecursive(internalNode root, Vector3 origin, float scale, ref internalNode[] nodeData, ref internalNode[] leafData)
@@ -232,8 +256,99 @@ public static class PhysicsDebugger {
             DrawTreeRecursive(ChildB, origin + new Vector3(2 * scale, -1, -2), scale * 0.55f, ref nodeData, ref leafData);
     }
 
+    public static void VisualizeBVHTree(ref internalNode[] nodeData, ref internalNode[] leafData, float treeScale)
+    {
+        internalNode root = nodeData[0];
+        DrawNode(root, Vector3.zero);
+        DrawTreeRecursive(root, Vector3.zero, 2f * treeScale, ref nodeData, ref leafData);
+    }
+
     static void DrawNode(internalNode node, Vector3 pos)
     {
+        Gizmos.color = Color.white;// / node.visited;
         Gizmos.DrawSphere(pos, 0.5f);
     }
+
+    static void CreateBoundingBoxes(ref internalNode[] nodeData, ref internalNode[] leafData)
+    {
+        for (int j = 0; j < leafData.Length; j++)
+        {
+            int parentId = leafData[j].parentId;
+            internalNode parent;
+            //[unroll(log2(count))]
+            for (int i = 0; i < 64; i++)
+            {
+                //InterlockedAdd(boundingInternalNodes[parentId].visited, 1);
+                nodeData[parentId].visited++;
+                //if (nodeData[parentId].visited < 2)
+                //{
+                //    return;
+                //}
+
+                parent = nodeData[parentId];
+
+                Vector3 Min;
+                Vector3 Max;
+                CalculateAABB(parent,out Min, out Max,ref nodeData,ref leafData);
+
+                Vector3 center = (parent.minPos + parent.maxPos) / 2;
+                Vector3 scale = new Vector3(Max.x - Min.x, Max.y - Min.y, Max.z - Min.z);
+                Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoScale);
+
+                nodeData[parentId] = parent;
+                nodeData[parentId].minPos = Min;
+                nodeData[parentId].maxPos = Max;
+                parentId = parent.parentId;
+
+                //DeviceMemoryBarrierWithGroupSync();
+
+                if (parentId == -1)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    static void CalculateAABB(Vector3 inMinA, Vector3 inMaxA, Vector3 inMinB, Vector3 inMaxB, out Vector3 minPoint, out Vector3 maxPoint)
+    {
+        Vector3 posAA = inMinA;
+        Vector3 posAB = inMaxA;
+        Vector3 posBA = inMinB;
+        Vector3 posBB = inMaxB;
+        float xmin = Mathf.Min(Mathf.Min(posBA.x, posBB.x), Mathf.Min(posAA.x, posAB.x));
+        float ymin = Mathf.Min(Mathf.Min(posBA.y, posBB.y), Mathf.Min(posAA.y, posAB.y));
+        float zmin = Mathf.Min(Mathf.Min(posBA.z, posBB.z), Mathf.Min(posAA.z, posAB.z));
+
+        float xmax = Mathf.Max(Mathf.Max(posBA.x, posBB.x), Mathf.Max(posAA.x, posAB.x));
+        float ymax = Mathf.Max(Mathf.Max(posBA.y, posBB.y), Mathf.Max(posAA.y, posAB.y));
+        float zmax = Mathf.Max(Mathf.Max(posBA.z, posBB.z), Mathf.Max(posAA.z, posAB.z));
+
+        minPoint = new Vector3(xmin, ymin, zmin);
+        maxPoint = new Vector3(xmax, ymax, zmax);
+    }
+
+    static void CalculateAABB(internalNode node, out Vector3 minPoint, out Vector3 maxPoint, ref internalNode[] nodeData, ref internalNode[] leafData)
+    {
+
+        internalNode childA;
+        internalNode childB;
+        GetNodeChildren(node, out childA, out childB, ref leafData, ref nodeData);
+        Vector3 posAA = childA.minPos;
+        Vector3 posBA = childB.minPos;
+
+        Vector3 posAB = childA.maxPos;
+        Vector3 posBB = childB.maxPos;
+        float xmin = Mathf.Min(posAA.x, posBA.x);//Mathf.Min(Mathf.Min(posBA.x, posBB.x), Mathf.Min(posAA.x, posAB.x));
+        float ymin = Mathf.Min(posAA.y, posBA.y);//Mathf.Min(Mathf.Min(posBA.y, posBB.y), Mathf.Min(posAA.y, posAB.y));
+        float zmin = Mathf.Min(posAA.z, posBA.z);//Mathf.Min(Mathf.Min(posBA.z, posBB.z), Mathf.Min(posAA.z, posAB.z));
+
+        float xmax = Mathf.Max(posAB.x, posBB.x);//Mathf.Max(Mathf.Max(posBA.x, posBB.x), Mathf.Max(posAA.x, posAB.x));
+        float ymax = Mathf.Max(posAB.y, posBB.y);//Mathf.Max(Mathf.Max(posBA.y, posBB.y), Mathf.Max(posAA.y, posAB.y));
+        float zmax = Mathf.Max(posAB.z, posBB.z);//Mathf.Max(Mathf.Max(posBA.z, posBB.z), Mathf.Max(posAA.z, posAB.z));
+
+        minPoint = new Vector3(xmin, ymin, zmin);
+        maxPoint = new Vector3(xmax, ymax, zmax);
+    }
+
 }
