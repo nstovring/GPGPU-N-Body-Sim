@@ -10,6 +10,7 @@ public class BufferSorter : MonoBehaviour
     public ComputeBuffer inputcomputeBuffer;
     //public ComputeBuffer sortcomputeBuffer;
     public ComputeBuffer leafNodeBuffer, internalNodeBuffer, indexBuffer, mergeOutputBuffer, boundingLeafNodeBuffer, boundingInternalNodeBuffer, velocityBuffer;//,o ,e ,f, d;
+    public ComputeBuffer AABBParentIdsBuffer;
     private ComputeBuffer argsBuffer;
     private uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
     CommandBuffer cm;
@@ -22,10 +23,12 @@ public class BufferSorter : MonoBehaviour
     //const int count = 10554096;
     private int cachedInstanceCount = -1;
 
-    public const int count = 256;//32768;
-    const int groupSize = 256;
+    public const int count = 65536;//32768;//16384;
+    const int groupSize = 32;
     const int mainKernelGroupSize = 32;
     int groupAmount = count / groupSize;
+
+    public Transform sphereCollider;
 
     const float size = 1f;
     [Range(0.001f, 1f)]
@@ -36,19 +39,18 @@ public class BufferSorter : MonoBehaviour
     public float diameter = 0.05f;
     public Vector3 gravityVec = new Vector3(0, -1, 0);
 
-
-
     int mainKernelHandler;
     int mortonKernelHandler;
     int treeConstructionKernelhandler;
     int boundingSphereKernelHandler;
+    int unionKerneHandler;
     int sortingKernelHandler;
     int mergeKernelHandler;
     int writeNodeDataKernelHandler;
     int traversalKernelKernelHandler;
 
     //int loadKernelHandler;
-    public Mesh cubeMesh;
+    public Mesh particleMesh;
     public Material instanceMaterial;
 
    
@@ -68,6 +70,7 @@ public class BufferSorter : MonoBehaviour
         //Setup buffers
         int particleStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(particle));
         int nodeStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(internalNode));
+
         leafNodeBuffer = new ComputeBuffer(count, nodeStructSize, ComputeBufferType.Default);
         boundingLeafNodeBuffer = new ComputeBuffer(count, nodeStructSize, ComputeBufferType.Default);
         internalNodeBuffer = new ComputeBuffer(count - 1, nodeStructSize, ComputeBufferType.Default);
@@ -77,9 +80,10 @@ public class BufferSorter : MonoBehaviour
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
         indexBuffer = new ComputeBuffer(count, sizeof(int), ComputeBufferType.Default);
         velocityBuffer = new ComputeBuffer(count, sizeof(float) * 3, ComputeBufferType.Default);
+        AABBParentIdsBuffer = new ComputeBuffer(count, sizeof(int), ComputeBufferType.Default);
         //Apply buffer for instanced mesh drawing 
         instanceMaterial.SetBuffer("positionBuffer", inputcomputeBuffer);
-        uint numIndices = (cubeMesh != null) ? (uint)cubeMesh.GetIndexCount(0) : 0;
+        uint numIndices = (particleMesh != null) ? (uint)particleMesh.GetIndexCount(0) : 0;
         args[0] = numIndices;
         args[1] = (uint)count;
         argsBuffer.SetData(args);
@@ -98,17 +102,18 @@ public class BufferSorter : MonoBehaviour
         sortingKernelHandler = sortShader.FindKernel("RadixSort");
         writeNodeDataKernelHandler = traversalShader.FindKernel("WriteNodeData");
         traversalKernelKernelHandler = traversalShader.FindKernel("TraversalKernel");
+        unionKerneHandler = AABBShader.FindKernel("CSUnion");
         //Create MortonIDs
         traversalShader.SetBuffer(mortonKernelHandler, "inputPoints", inputcomputeBuffer);
         traversalShader.Dispatch(mortonKernelHandler, count / groupSize, 1, 1);
         Debug.Log("Dispatched morton kernel");
         ////Sort IDs
         sortShader.SetBuffer(sortingKernelHandler, "Data", inputcomputeBuffer);
-        sortShader.Dispatch(sortingKernelHandler, count / groupSize, 1, 1);
+        //sortShader.Dispatch(sortingKernelHandler, count / groupSize, 1, 1);
 
         mergeShader.SetBuffer(mergeKernelHandler, "inputPoints", inputcomputeBuffer);
         mergeShader.SetBuffer(mergeKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
-        mergeShader.Dispatch(mergeKernelHandler, count / groupSize, 1, 1);
+        //mergeShader.Dispatch(mergeKernelHandler, count / groupSize, 1, 1);
 
         Debug.Log("Dispatched sorting kernel");
 
@@ -121,7 +126,7 @@ public class BufferSorter : MonoBehaviour
 
      
 
-        traversalShader.Dispatch(writeNodeDataKernelHandler, count / groupSize, 1, 1);
+        //traversalShader.Dispatch(writeNodeDataKernelHandler, count / groupSize, 1, 1);
         //Create Tree
         bvhShader.SetBuffer(treeConstructionKernelhandler, "inputPoints", inputcomputeBuffer);
         bvhShader.SetBuffer(treeConstructionKernelhandler, "internalNodes", internalNodeBuffer);
@@ -130,8 +135,9 @@ public class BufferSorter : MonoBehaviour
         bvhShader.SetBuffer(treeConstructionKernelhandler, "boundingLeafNodes", boundingLeafNodeBuffer);
         bvhShader.SetBuffer(treeConstructionKernelhandler, "mergeOutputBuffer", mergeOutputBuffer);
         bvhShader.SetBuffer(treeConstructionKernelhandler, "indexBuffer", indexBuffer);
+        bvhShader.SetBuffer(treeConstructionKernelhandler, "parentIds", AABBParentIdsBuffer);
 
-        bvhShader.Dispatch(treeConstructionKernelhandler, (count) / groupSize, 1, 1);
+        //bvhShader.Dispatch(treeConstructionKernelhandler, (count) / groupSize, 1, 1);
         
         Debug.Log("Dispatched tree contruction kernel");
         
@@ -148,7 +154,13 @@ public class BufferSorter : MonoBehaviour
         AABBShader.SetBuffer(boundingSphereKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
         AABBShader.SetBuffer(boundingSphereKernelHandler, "boundingInternalNodes", boundingInternalNodeBuffer);
         AABBShader.SetBuffer(boundingSphereKernelHandler, "boundingLeafNodes", boundingLeafNodeBuffer);
-        AABBShader.Dispatch(boundingSphereKernelHandler, count / groupSize, 1, 1);
+        AABBShader.SetBuffer(boundingSphereKernelHandler, "parentIds", AABBParentIdsBuffer);
+
+        AABBShader.SetBuffer(unionKerneHandler, "boundingLeafNodes", boundingLeafNodeBuffer);
+        AABBShader.SetBuffer(unionKerneHandler, "boundingInternalNodes", boundingInternalNodeBuffer);
+        AABBShader.SetBuffer(unionKerneHandler, "parentIds", AABBParentIdsBuffer);
+
+        //AABBShader.Dispatch(boundingSphereKernelHandler, count / groupSize, 1, 1);
         Debug.Log("Dispatched bounding calculation kernel");
 
         //internalNodeBuffer.GetData(nodeData);
@@ -160,7 +172,7 @@ public class BufferSorter : MonoBehaviour
         traversalShader.SetBuffer(traversalKernelKernelHandler, "mergeOutputBuffer", mergeOutputBuffer);
         traversalShader.SetBuffer(traversalKernelKernelHandler, "velocityBuffer", velocityBuffer);
 
-        traversalShader.Dispatch(traversalKernelKernelHandler, count / mainKernelGroupSize, 1, 1);
+        //traversalShader.Dispatch(traversalKernelKernelHandler, count / mainKernelGroupSize, 1, 1);
 
         //Apply Movement
         //computeShader.SetBuffer(mainKernelHandler, "internalNodes", internalNodeBuffer);
@@ -171,7 +183,7 @@ public class BufferSorter : MonoBehaviour
         traversalShader.SetBuffer(mainKernelHandler, "inputPoints", inputcomputeBuffer);
         traversalShader.SetBuffer(mainKernelHandler, "velocityBuffer", velocityBuffer);
 
-        traversalShader.Dispatch(mainKernelHandler, count / mainKernelGroupSize, 1, 1);
+        //traversalShader.Dispatch(mainKernelHandler, count / mainKernelGroupSize, 1, 1);
         Debug.Log("Dispatched physics kernel");
 
 
@@ -204,10 +216,10 @@ public class BufferSorter : MonoBehaviour
         //computeShader.SetFloat("DeltaTime", Time.deltaTime / integrationStep);
         //Graphics.ExecuteCommandBufferAsync(cm,ComputeQueueType.Default);
         DispatchShaders();
-        Graphics.DrawMeshInstancedIndirect(cubeMesh, 0, instanceMaterial, new Bounds(Vector3.zero, new Vector3(0.1f, 0.1f, 0.1f)), argsBuffer);
+        Graphics.DrawMeshInstancedIndirect(particleMesh, 0, instanceMaterial, new Bounds(Vector3.zero, new Vector3(0.1f, 0.1f, 0.1f)), argsBuffer);
     }
 
-
+    bool GizmoIterator = false;
 
     internalNode[] nodeData = new internalNode[count-1];
     internalNode[] leafData = new internalNode[count];
@@ -225,20 +237,29 @@ public class BufferSorter : MonoBehaviour
         traversalShader.SetVector("gravityVec", gravityVec);
         traversalShader.SetFloat("angularSpeed", angularSpeed);
         traversalShader.SetFloat("DeltaTime", Time.deltaTime / integrationStep);
+
+        if (sphereCollider != null)
+        traversalShader.SetVector("sphereColliderPos", sphereCollider.transform.position);
+
         sortShader.Dispatch(sortingKernelHandler, count / groupSize, 1, 1);
         mergeShader.Dispatch(mergeKernelHandler, count / groupSize, 1, 1);
         traversalShader.Dispatch(writeNodeDataKernelHandler, count / groupSize, 1, 1);
-        bvhShader.Dispatch(treeConstructionKernelhandler, (count) / groupSize, 1, 1);
+        bvhShader.Dispatch(treeConstructionKernelhandler, count / groupSize, 1, 1);
         AABBShader.Dispatch(boundingSphereKernelHandler, count / groupSize, 1, 1);
+
+        //Cpu AABB implementation here
+        //boundingInternalNodeBuffer.GetData(nodeData);
+        //boundingLeafNodeBuffer.GetData(leafData);
+        //CreateBoundingBoxes(ref nodeData,ref leafData);
+        //boundingInternalNodeBuffer.SetData(nodeData);
+
         traversalShader.Dispatch(traversalKernelKernelHandler, count / mainKernelGroupSize, 1, 1);
         traversalShader.Dispatch(mainKernelHandler, count / mainKernelGroupSize, 1, 1);
 
         if (swap)
         {
-            velocityBuffer.GetData(velocityData);
-            Print("Velocity data", velocityData);
-            internalNodeBuffer.GetData(nodeData);
-            Print("Node Data", nodeData, false);
+            boundingLeafNodeBuffer.GetData(nodeData);
+            Print("leaf Node Data", nodeData, false);
             boundingInternalNodeBuffer.GetData(nodeData);
             Print("Bounding Node Data", nodeData, false);
             boundingLeafNodeBuffer.GetData(leafData);
@@ -248,6 +269,8 @@ public class BufferSorter : MonoBehaviour
             swap = false;
         }
 
+        
+
         if (checkSorted)
         {
             mergeOutputBuffer.GetData(particleData);
@@ -255,6 +278,82 @@ public class BufferSorter : MonoBehaviour
             Debug.Log("Duplicates: " + Duplicates(particleData));
         }
 
+    }
+
+    void CreateBoundingBox(internalNode node,ref internalNode[] internalNodes,ref internalNode[] leafNodes)
+    {
+        internalNode ChildA;
+        internalNode ChildB;
+        PhysicsDebugger.GetNodeChildren(node, out ChildA, out ChildB, ref leafNodes, ref internalNodes);
+
+        if (!PhysicsDebugger.isLeaf(ChildA))
+        {
+            CreateBoundingBox(ChildA,ref internalNodes,ref leafNodes);
+        }
+        if (!PhysicsDebugger.isLeaf(ChildB))
+        {
+            CreateBoundingBox(ChildB,ref internalNodes,ref leafNodes);
+        }
+
+        Vector3 minPoint;
+        Vector3 maxPoint;
+        PhysicsDebugger.CalculateAABB(node, out minPoint, out maxPoint, ref internalNodes, ref leafNodes);
+        internalNodes[node.nodeId].minPos = minPoint;
+        internalNodes[node.nodeId].maxPos = maxPoint;
+    }
+
+
+    IEnumerator CreateBoundingBox(internalNode node, internalNode[] internalNodes, internalNode[] leafNodes)
+    {
+        internalNode ChildA;
+        internalNode ChildB;
+        PhysicsDebugger.GetNodeChildren(node,out ChildA,out ChildB, ref leafNodes, ref internalNodes);
+
+        if (!PhysicsDebugger.isLeaf(ChildA))
+        {
+            yield return CreateBoundingBox(ChildA, internalNodes, leafNodes);
+        }
+        if (!PhysicsDebugger.isLeaf(ChildB))
+        {
+            yield return CreateBoundingBox(ChildB, internalNodes, leafNodes);
+        }
+
+        Vector3 minPoint;
+        Vector3 maxPoint;
+        PhysicsDebugger.CalculateAABB(node, out minPoint, out maxPoint, ref internalNodes, ref leafNodes);
+        internalNodes[node.nodeId].minPos = minPoint;
+        internalNodes[node.nodeId].maxPos = maxPoint;
+        Vector3 center = (node.minPos + node.maxPos) / 2;
+        Vector3 scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
+        Debug.DrawLine(node.minPos * GizmoPosScale, node.maxPos * GizmoPosScale);
+        yield return new WaitForSeconds(0.5f);
+    }
+
+    void CreateBoundingBoxes(ref internalNode[] internalNodes, ref internalNode[] leafNodes)
+    {
+        CreateBoundingBox(internalNodes[0],ref internalNodes,ref leafNodes);
+        //List<int> parentIndexes = new List<int>();
+        //for (int i = 0; i < leafNodes.Length; i++)
+        //{
+        //    //Debug.Log(leafnodes[i].parentId);
+        //    int parentId = leafNodes[i].parentId;
+        //    int count = 0;
+        //    while (parentId != -1 && count < 32)
+        //    {
+        //        Vector3 minPoint;
+        //        Vector3 maxPoint;
+        //        PhysicsDebugger.CalculateAABB(internalNodes[parentId], out minPoint, out maxPoint, ref internalNodes, ref leafNodes);
+        //        if (internalNodes[parentId].minPos.magnitude > 0)
+        //            PhysicsDebugger.CalculateAABB(internalNodes[parentId].minPos, internalNodes[parentId].maxPos, minPoint, maxPoint, out minPoint, out maxPoint);
+        //
+        //        internalNodes[parentId].minPos = minPoint;
+        //        internalNodes[parentId].maxPos = maxPoint;
+        //        internalNodes[parentId].visited++;
+        //        parentId = internalNodes[parentId].parentId;
+        //
+        //        count++;
+        //    }
+        //}
     }
 
     private void Print(string name, Vector3[] array)
@@ -293,11 +392,18 @@ public class BufferSorter : MonoBehaviour
     public float treeScale = 0.55f;
     public int currentCollisions = 0;
 
+    public bool debuggingEnabled = false;
     void OnDrawGizmos()
     {
-        boundingInternalNodeBuffer.GetData(nodeData);
-        boundingLeafNodeBuffer.GetData(leafData);
-        mergeOutputBuffer.GetData(particleData);
+        debuggingEnabled = visualizeHeirarchy || visualizeBoundingBoxes || visualizePotentialCollisions || visualizeBVHTree;
+        if (!debuggingEnabled)
+            return;
+        if (boundingInternalNodeBuffer != null)
+            boundingInternalNodeBuffer.GetData(nodeData);
+        if (boundingLeafNodeBuffer != null)
+            boundingLeafNodeBuffer.GetData(leafData);
+        if (mergeOutputBuffer != null)
+            mergeOutputBuffer.GetData(particleData);
         if(showVelocities)
         PhysicsDebugger.ShowVelocities(ref particleData);
         if (visualizeHeirarchy)
@@ -315,14 +421,10 @@ public class BufferSorter : MonoBehaviour
 
         if (visualizeBVHTree)
         {
-            PhysicsDebugger.VisualizeBVHTree(ref nodeData, ref leafData, treeScale);
+            PhysicsDebugger.VisualizeBVHTree(ref nodeData, ref leafData, treeScale, leafData[heirarchyLeafToCheckForCollision]);
             //swap = false;
         }
     }
-
-   
-
-  
 
     void OnDestroy()
     {
@@ -337,6 +439,7 @@ public class BufferSorter : MonoBehaviour
             argsBuffer.Release();
         argsBuffer = null;
         velocityBuffer.Release();
+        AABBParentIdsBuffer.Release();
     }
 
     void Print(string name, uint[] array)

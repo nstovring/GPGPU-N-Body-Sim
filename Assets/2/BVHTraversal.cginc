@@ -1,9 +1,10 @@
 ﻿#include "BVHTools.cginc"
 
+
 void TraverseBVHIterative(internalNode leaf, float radius, out int collisionList[32])
 {
     internalNode node = GetRoot();
-    int stack[64]; // = { -2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2,-2 };
+    int stack[64];
 
     for (uint i = 0; i < 64; i++)
     {
@@ -16,7 +17,7 @@ void TraverseBVHIterative(internalNode leaf, float radius, out int collisionList
     int maxLoop = 0;
     bool solved = false;
 
-    for (int j = 0; j < 1024; j++)
+    for (int j = 0; j < 512; j++)
     {
         if (!solved)
         {
@@ -24,16 +25,15 @@ void TraverseBVHIterative(internalNode leaf, float radius, out int collisionList
             internalNode childB;
             GetChildren(node, childA, childB);
 
-            float3 AABBRadius = float3(radius, radius, radius);
+            float3 AABBRadius = float3(radius, radius, radius) * 1;
 
+            bool overlapA = AABBOverlap(leaf.minPos, leaf.maxPos, childA.minPos, childA.maxPos);
+            bool overlapB = AABBOverlap(leaf.minPos, leaf.maxPos, childB.minPos, childB.maxPos);
 
-            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos, childA.maxPos);
-            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos, childB.maxPos);
-
-            //if (!isLeaf(childA) && node.bLeaves.y <= leaf.objectId)
+            //if (!isLeaf(childA) && AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, leafNodes[childA.bLeaves.y].minPos, leafNodes[childA.bLeaves.y].maxPos))
             //    overlapA = false;
             //
-            //if (!isLeaf(childB) && node.bLeaves.y <= leaf.objectId)
+            //if (!isLeaf(childB) && AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, leafNodes[childB.bLeaves.y].minPos, leafNodes[childB.bLeaves.y].maxPos))
             //    overlapB = false;
 
             if (overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)

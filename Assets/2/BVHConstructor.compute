@@ -90,7 +90,7 @@ void CSCreateBVH(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     {
         boundingInternalNodes[ChildA.nodeId].parentId = id.x;
     }
-
+    
     if (isLeaf(ChildB))
     {
         boundingLeafNodes[ChildB.nodeId].parentId = id.x;
@@ -100,8 +100,13 @@ void CSCreateBVH(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         boundingInternalNodes[ChildB.nodeId].parentId = id.x;
     }
 
+   
 
     internalNode node = boundingInternalNodes[id.x];
+    //if (id.x == 0)
+    //    node.parentId = -10;
+
+    parentIds[id.x] = boundingLeafNodes[id.x].parentId;
     node.leaves = leaves;
     node.bLeaves = inrange;
     node.intNodes = intNodes;

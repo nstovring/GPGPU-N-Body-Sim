@@ -92,11 +92,11 @@ void CSMain (uint3 id : SV_DispatchThreadID)
                 }
 
                 dampingForce += -s.damping * (b.velocity - a.velocity);
-                springForce += -s.stiffness * (a.position - b.position) * (s.restLength - distance(b.position, a.position)) * stiffness;
+                springForce += -s.stiffness * (a.position - b.position) * (s.restLength - distance(b.position, a.position));
 			}
 		}
 		//Super Simple Collision
-		float3 c = distance(position + velocity * delta, spherePos) < 0.54 ? Normalize(position + velocity * delta - spherePos) * (1 - distance(position + velocity * delta, spherePos)) : float3(0, 0, 0);
+		float3 c = distance(position + velocity * delta, spherePos) < 6.54 ? Normalize(position + velocity * delta - spherePos) * (10 - distance(position + velocity * delta, spherePos)) : float3(0, 0, 0);
         //Plane Collision
         float3 cP = (position + velocity * delta).y < 0.1 ? float3(0, 1, 0) * (1 - (position + velocity * delta).y) : float3(0, 0, 0);
 

@@ -22,7 +22,7 @@ public class ClothSimulator : MonoBehaviour {
     [Delayed]
     public float globalStiffness;
     [Delayed]
-    [Range(0,1)]
+    [Range(0,100)]
     public float damping;
     [Range(1f,1000)]
     public float mass;
@@ -55,7 +55,6 @@ public class ClothSimulator : MonoBehaviour {
         mainClothKernelHandler = clothComputeShader.FindKernel("CSMain");
         springKernelHandler = clothComputeShader.FindKernel("CSSprings");
         int particleStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(SpringHandler.particle));
-        ///Debug.Log(particleStructSize);
         int springStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(SpringHandler.spring));
         int clothVertexStructSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(clothVertex));
 
@@ -65,8 +64,6 @@ public class ClothSimulator : MonoBehaviour {
         Vector3[] initialPositions = new Vector3[count];
         int rows = (int) Mathf.Sqrt(count);
         int collumns = (int)Mathf.Sqrt(count);
-
-        //Debug.Log(rows +"," + collumns);
 
         for (int i = 0; i < particles.Length; i++)
         {
@@ -94,9 +91,9 @@ public class ClothSimulator : MonoBehaviour {
             {
                 particles[y + x * rows].mass = mass / count;
                 particles[y + x * rows].iD = y + x * rows;
-                particles[y + x * rows].position = transform.TransformPoint(new Vector3(x/ (float)rows, 0, y/ (float)collumns));
+                particles[y + x * rows].position = transform.TransformPoint(new Vector3((x), 0, y));
                 particles[y + x * rows].isFixed = 0;
-                initialPositions[y + x * rows] = transform.position + transform.InverseTransformPoint(new Vector3(x / (float)rows, 0, y / (float)collumns));
+                initialPositions[y + x * rows] = transform.position + transform.InverseTransformPoint(new Vector3((x), 0, y ));
                 AddSprings(x, y, rows, particles,ref springs);
             }
         }
@@ -105,7 +102,6 @@ public class ClothSimulator : MonoBehaviour {
         {
             particles[i].isFixed = 1;
         }
-
 
         particleBuffer = new ComputeBuffer(count, particleStructSize, ComputeBufferType.Default);
         springBuffer = new ComputeBuffer(springs.Count, springStructSize, ComputeBufferType.Default);

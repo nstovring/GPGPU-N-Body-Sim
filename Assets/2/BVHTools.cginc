@@ -24,7 +24,7 @@ struct internalNode
 };
 
 
-#define ThreadX 256
+#define ThreadX 32
 #define MainKernelThreadX 32
 
 static const float PI = 3.14159265f;
@@ -36,6 +36,7 @@ RWStructuredBuffer<internalNode> leafNodes : register(u3);
 RWStructuredBuffer<internalNode> boundingInternalNodes : register(u4);
 RWStructuredBuffer<internalNode> boundingLeafNodes : register(u5);
 RWStructuredBuffer<float3> velocityBuffer : register(u6);
+RWStructuredBuffer<int> parentIds : register(u7);
 
 // Expands a 10-bit integer into 30 bits
 // by inserting 2 zeros after each bit.
@@ -80,36 +81,24 @@ void GetChildren(internalNode node, out internalNode childA, out internalNode ch
     if (leaves.x != -1)
     {
         childA = boundingLeafNodes[leaves.x];
-        boundingInternalNodes[leaves.x].parentId = node.nodeId;
+        //boundingInternalNodes[leaves.x].parentId = node.nodeId;
     }
     if (leaves.y != -1)
     {
         childB = boundingLeafNodes[leaves.y];
-        boundingLeafNodes[leaves.y].parentId = node.nodeId;
+        //boundingLeafNodes[leaves.y].parentId = node.nodeId;
     }
     if (intNodes.x != -1)
     {
         childA = boundingInternalNodes[intNodes.x];
-        boundingLeafNodes[intNodes.x].parentId = node.nodeId;
+        //boundingLeafNodes[intNodes.x].parentId = node.nodeId;
     }
     if (intNodes.y != -1)
     {
         childB = boundingInternalNodes[intNodes.y];
-        boundingInternalNodes[intNodes.y].parentId = node.nodeId;
+        //boundingInternalNodes[intNodes.y].parentId = node.nodeId;
     }
 }
-
-void SetLeafParent(int leafIndex,int parentIndex)
-{
-}
-
-void SetIntNodeParent(int nodeindex, int parentIndex)
-{
-
-}
-
-
-
 
 
 bool AABBOverlap(float3 minA, float3 maxA, float3 minB, float3 maxB)

@@ -51,7 +51,7 @@
         {
         #ifdef UNITY_PROCEDURAL_INSTANCING_ENABLED
 			radius = positionBuffer[unity_InstanceID].radius;
-            float4 data = float4(positionBuffer[unity_InstanceID].pos * 20, radius * 20);
+            float4 data = float4(positionBuffer[unity_InstanceID].pos * 20, radius * 20 * 2);
 			direction = positionBuffer[unity_InstanceID].dir;
 			position = positionBuffer[unity_InstanceID].pos;
 			morton =  positionBuffer[unity_InstanceID].morton;
@@ -75,7 +75,7 @@
 
         void surf (Input IN, inout SurfaceOutputStandard o) {
             fixed4 c = tex2D (_MainTex, IN.uv_MainTex);
-            o.Albedo = position;// float3(1,1,1) * color;// lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
+            o.Albedo = float3( position.y,0, 0.5+ length(direction) *2);// (0.5 + length(direction)) * smoothstep(float3(1,0,0) , float3(0,1,0), position.y);// float3(1,1,1) * color;// lerp(float3(1,1,1), float3(1,0,0),collision);//float3(1,1,1) * (morton/(_MortonScale * 10000000));
             o.Metallic = _Metallic;
             o.Smoothness = _Glossiness;
             o.Alpha = c.a;

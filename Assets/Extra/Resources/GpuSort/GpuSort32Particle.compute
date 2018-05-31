@@ -18,7 +18,7 @@
 #define BITONIC_BLOCK_SIZE 512
 #define TRANSPOSE_BLOCK_SIZE 16
 
-#define THREADX 256
+#define THREADX 32
 #define THREADY 1
 #define GROUP_THREADS THREADX * THREADY
 //--------------------------------------------------------------------------------------

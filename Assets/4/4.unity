@@ -4152,7 +4152,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1732396341
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4165,11 +4165,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   clothComputeShader: {fileID: 7200000, guid: 45cc4076de2c188439f5fe22a395781c, type: 3}
-  count: 4096
+  count: 2048
   clothMaterial: {fileID: 2100000, guid: d7e91d40eae9cf344964fe8598976168, type: 2}
   globalStiffness: 10
-  damping: 0.298
-  mass: 1000
+  damping: 10
+  mass: 256
   gravityMul: 1
   clothHandler: {fileID: 1732396342}
   sphereCollider: {fileID: 2001742782}
@@ -4280,7 +4280,7 @@ MeshRenderer:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 2001742778}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -4334,8 +4334,8 @@ Transform:
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 2001742778}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.154, y: 1.19, z: 0.732}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: -5.7, y: 1.19, z: 13.75}
+  m_LocalScale: {x: 9.468043, y: 9.468045, z: 9.468045}
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 6
@@ -4346,7 +4346,7 @@ MonoBehaviour:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 2001742778}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9814c1d240ff6b74fbe65447be01725c, type: 3}
   m_Name: 
@@ -4432,17 +4432,18 @@ MonoBehaviour:
   AABBShader: {fileID: 7200000, guid: fa0f08264a6b6c54db35d85a5f590d32, type: 3}
   mat: {fileID: 2100000, guid: 76fa2a5294f612145a6b026960cf3a1b, type: 2}
   ballmat: {fileID: 2100000, guid: 47646212524189d41a3b5e5e8af68907, type: 2}
+  sphereCollider: {fileID: 2001742782}
   speed: 1
-  angularSpeed: 1
+  angularSpeed: 2000
   gravityMul: 1
-  diameter: 0.031
-  gravityVec: {x: 0, y: -1.07, z: 0}
-  cubeMesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  diameter: 0.015
+  gravityVec: {x: 0, y: -1, z: 0}
+  particleMesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
   instanceMaterial: {fileID: 2100000, guid: 1cd3f0037b6662b44aa7105e8aa0b583, type: 2}
   swap: 0
   checkSorted: 0
-  GizmoPosScale: 20
-  GizmoScale: 20
+  GizmoPosScale: 1
+  GizmoScale: 1
   visualizeBoundingBoxes: 0
   boundingBoxMin: 0
   boundingBoxInt: 0
@@ -4452,8 +4453,9 @@ MonoBehaviour:
   heirarchyLeaf: 0
   visualizeBVHTree: 0
   showVelocities: 0
-  treeScale: 0.55
+  treeScale: 1.5
   currentCollisions: 0
+  debuggingEnabled: 0
 --- !u!81 &2130259646
 AudioListener:
   m_ObjectHideFlags: 0

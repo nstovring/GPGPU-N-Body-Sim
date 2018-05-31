@@ -50,7 +50,7 @@ public static class PhysicsDebugger {
             }
         }
 
-        TraverseBVHIterative(leafData[leaf], diameter / 2, out collisions,ref nodeData, ref leafData);
+        TraverseBVHIterative(leafData[leaf], diameter, out collisions,ref nodeData, ref leafData);
         Vector3 leafPos = particleData[leafData[leaf].objectId].position;
         Vector3 AABBRadius = new Vector3(diameter / 2, diameter / 2, diameter / 2);
         Gizmos.color = Color.green;
@@ -66,6 +66,7 @@ public static class PhysicsDebugger {
                 Gizmos.DrawLine(leafPos * GizmoPosScale, particleData[col].position * GizmoScale);
                 Gizmos.DrawWireSphere(particleData[col].position * GizmoPosScale, (diameter / 2) * GizmoScale);
                 output +=  col + ",";
+                //Debug.Log(AABBOverlap(leafPos - AABBRadius, leafPos + AABBRadius, particleData[col].position - AABBRadius, particleData[col].position + AABBRadius));
             }
         }
 
@@ -74,7 +75,7 @@ public static class PhysicsDebugger {
 
  
 
-    static void GetNodeChildren(internalNode node, out internalNode childA, out internalNode childB, ref internalNode[] leafData, ref internalNode[] nodeData)
+    public static void GetNodeChildren(internalNode node, out internalNode childA, out internalNode childB, ref internalNode[] leafData, ref internalNode[] nodeData)
     {
         int2 leaves = node.leaves;
         int2 intNodes = node.intNodes;
@@ -94,6 +95,31 @@ public static class PhysicsDebugger {
 
     }
 
+    public static void DrawCube(internalNode node)
+    {
+        Vector3 center = (node.minPos + node.maxPos) / 2;
+        Vector3 scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
+        Gizmos.DrawWireCube(center * GizmoPosScale, scale * GizmoPosScale);
+    }
+    static bool AABBOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+    {
+        bool x = minA.x <= maxB.x && minB.x <= maxA.x;
+        bool y = minA.y <= maxB.y && minB.y <= maxA.y;
+        bool z = minA.z <= maxB.z && minB.z <= maxA.z;
+
+        return (x && y && z);// || (!x && !y && !z);
+
+        return (minA.x <= maxB.x && maxA.x >= minB.x) &&
+            (minA.y <= maxB.y && maxA.y >= minB.y) &&
+            (minA.z <= maxB.z && maxA.z >= minB.z);
+    }
+
+    public static bool isLeaf(internalNode node)
+    {
+        if (node.objectId != -1)
+            return true;
+        return false;
+    }
 
     static void TraverseBVHIterative(internalNode leaf, float radius, out int[] collisionList, ref internalNode[] internalNodeData, ref internalNode[] leafData)
     {
@@ -106,14 +132,12 @@ public static class PhysicsDebugger {
             collisionList[i] = -1;
         }
 
-
         int traversalCount = 0;
         int collisionCount = 0;
         int maxLoop = 0;
         Gizmos.color = Color.green;
         Vector3 AABBRadius = new Vector3(radius, radius, radius) * 1;
-        Vector3 scale = AABBRadius;// new Vector3(leaf.maxPos.x - leaf.minPos.x, leaf.maxPos.y - leaf.minPos.y, leaf.maxPos.z - leaf.minPos.z);
-        //Gizmos.DrawWireCube(((leaf.minPos + leaf.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
+        Vector3 scale = AABBRadius;
 
         do
         {
@@ -121,34 +145,43 @@ public static class PhysicsDebugger {
             internalNode childB;
             GetNodeChildren(node, out childA, out childB, ref leafData,ref internalNodeData);
 
-            AABBRadius = new Vector3(radius, radius, radius) * 0.5f;
-            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos, childA.maxPos);
-            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos, childB.maxPos);
+            AABBRadius = new Vector3(radius, radius, radius) * 0;
+            bool overlapA = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childA.minPos - AABBRadius, childA.maxPos +AABBRadius);
+            bool overlapB = AABBOverlap(leaf.minPos - AABBRadius, leaf.maxPos + AABBRadius, childB.minPos - AABBRadius, childB.maxPos + AABBRadius);
 
-            if (overlapA && isLeaf(childA) && childA.objectId != leaf.objectId)
+            if (overlapB)
+            {
+                Gizmos.color = Color.green;
+                DrawCube(childB);
+            }
+            if (overlapA)
+            {
+                Gizmos.color = Color.red;
+                DrawCube(childA);
+            }
+
+            if (overlapA && isLeaf(childA) )
             {
                 collisionList[collisionCount] = childA.objectId;
                 collisionCount++;
             }
-            if (overlapB && isLeaf(childB) && childB.objectId != leaf.objectId)
+            if (overlapB && isLeaf(childB) )
             {
                 collisionList[collisionCount] = childB.objectId;
                 collisionCount++;
             }
-            //currentCollisions = collisionCount;
 
             bool traverseA = (overlapA && !isLeaf(childA));
             bool traverseB = (overlapB && !isLeaf(childB));
-            //Debug.Log(stack[traversalCount]);
 
             if (!traverseA && !traverseB)
             {
                 stack[traversalCount] = -1;
                 traversalCount--;
                 traversalCount = traversalCount <= 0 ? 0 : traversalCount;
+                //Debug.Log("Popping Stack: " + traversalCount);
                 if (stack[traversalCount] == -1)
                 {
-                    //Debug.Log("Popping Stack : MaxLoop," + maxLoop);
                     return;
                 }
                 node = internalNodeData[stack[traversalCount]];
@@ -156,42 +189,29 @@ public static class PhysicsDebugger {
             else
             {
                 if (traverseA)
+                {
                     node = childA;
+                    //Gizmos.color = Color.red;
+                    //DrawCube(node);
+                }
                 else
+                {
                     node = childB;
+                    //Gizmos.color = Color.green;
+                    //DrawCube(node);
+                }
 
                 if (traverseA && traverseB)
                 {
                     stack[traversalCount] = childB.nodeId;
-                    //Gizmos.color = Color.red;
-                    //scale = new Vector3(childB.maxPos.x - childB.minPos.x, childB.maxPos.y - childB.minPos.y, childB.maxPos.z - childB.minPos.z);
-                    //Gizmos.DrawWireCube(((childB.minPos + childB.maxPos) / 2) * GizmoPosScale, scale * GizmoScale);
-
                     traversalCount++;
                     //Debug.Log("Pushing Stack");
                 }
             }
             maxLoop++;
         } while (stack[traversalCount] != -1);//traversing && traversalCount < 64);
-        Debug.Log("Traversal Count," + maxLoop);
     }
 
-
-    static bool AABBOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
-    {
-        return (minA.x <= maxB.x && maxA.x >= minB.x) &&
-            (minA.y <= maxB.y && maxA.y >= minB.y) &&
-            (minA.z <= maxB.z && maxA.z >= minB.z);
-    }
-
-    static bool isLeaf(internalNode node)
-    {
-        if (node.objectId != -1)
-            return true;
-        return false;
-    }
-
-   
 
     public static float GizmoPosScale;
     public static float GizmoScale;
@@ -207,7 +227,7 @@ public static class PhysicsDebugger {
         for (int i = boundingBoxMin; i < sortedNodeData.Count; i++)
         {
             internalNode node = sortedNodeData[i];
-            offset += new Vector3(scale.x, 0, 0);
+            //offset += new Vector3(scale.x, 0, 0);
             //Gizmos.color =  Color.white * (node.overlap);
             Vector3 center = (node.minPos + node.maxPos) / 2 + offset;
             scale = new Vector3(node.maxPos.x - node.minPos.x, node.maxPos.y - node.minPos.y, node.maxPos.z - node.minPos.z);
@@ -239,16 +259,50 @@ public static class PhysicsDebugger {
             DrawBoundingRecursive(ChildB, ref nodeData, ref leafData);
     }
 
+    static void DrawTreeRecursive(internalNode root, Vector3 origin, float scale, ref internalNode[] nodeData, ref internalNode[] leafData, internalNode sampleNode)
+    {
+        internalNode ChildA;
+        internalNode ChildB;
+
+        GetNodeChildren(root, out ChildA, out ChildB, ref leafData, ref nodeData);
+        Vector3 AABBRadius = new Vector3(sampleNode.sRadius, sampleNode.sRadius, sampleNode.sRadius);
+        if (AABBOverlap(sampleNode.minPos, sampleNode.maxPos, root.minPos, root.maxPos))
+            Gizmos.color = Color.blue;
+        else
+            Gizmos.color = Color.white;
+
+        Vector3 nScale = new Vector3(root.maxPos.x - root.minPos.x, root.maxPos.y - root.minPos.y, root.maxPos.z - root.minPos.z);
+        Gizmos.DrawWireCube(origin, nScale);
+
+        Color semiTransparent = new Color(1, 1, 1, 0.5f);
+        Debug.DrawLine(origin, origin + new Vector3(-2 * scale, -1, 2), semiTransparent);
+        Debug.DrawLine(origin, origin + new Vector3(2 * scale, -1, -2), semiTransparent);
+        DrawNode(ChildA, origin + new Vector3(-2 * scale, -1, 2), ChildA.maxPos - ChildA.minPos);
+        DrawNode(ChildB, origin + new Vector3(2 * scale, -1, -2), ChildB.maxPos - ChildB.minPos);
+
+        if (!isLeaf(ChildA))
+            DrawTreeRecursive(ChildA, origin + new Vector3(-2 * scale, -1, 2), scale * 0.55f, ref nodeData, ref leafData, sampleNode);
+        if (!isLeaf(ChildB))
+            DrawTreeRecursive(ChildB, origin + new Vector3(2 * scale, -1, -2), scale * 0.55f, ref nodeData, ref leafData, sampleNode);
+    }
+
+
     static void DrawTreeRecursive(internalNode root, Vector3 origin, float scale, ref internalNode[] nodeData, ref internalNode[] leafData)
     {
         internalNode ChildA;
         internalNode ChildB;
 
         GetNodeChildren(root, out ChildA, out ChildB, ref leafData, ref nodeData);
-        Debug.DrawLine(origin, origin + new Vector3(-2 * scale, -1, 2));
-        Debug.DrawLine(origin, origin + new Vector3(2 * scale, -1, -2));
-        DrawNode(ChildA, origin + new Vector3(-2 * scale, -1, 2));
-        DrawNode(ChildB, origin + new Vector3(2 * scale, -1, -2));
+
+        Gizmos.color = Color.blue;
+        Vector3 nScale = new Vector3(root.maxPos.x - root.minPos.x, root.maxPos.y - root.minPos.y, root.maxPos.z - root.minPos.z);
+        Gizmos.DrawWireCube(origin,  nScale);
+
+        Color semiTransparent = new Color(1, 1, 1, 0.5f);
+        Debug.DrawLine(origin, origin + new Vector3(-2 * scale, -1, 2),semiTransparent);
+        Debug.DrawLine(origin, origin + new Vector3(2 * scale, -1, -2), semiTransparent);
+        DrawNode(ChildA, origin + new Vector3(-2 * scale, -1, 2), ChildA.maxPos - ChildA.minPos);
+        DrawNode(ChildB, origin + new Vector3(2 * scale, -1, -2), ChildB.maxPos - ChildB.minPos);
 
         if (!isLeaf(ChildA))
             DrawTreeRecursive(ChildA, origin + new Vector3(-2 * scale, -1, 2), scale * 0.55f, ref nodeData, ref leafData);
@@ -259,13 +313,30 @@ public static class PhysicsDebugger {
     public static void VisualizeBVHTree(ref internalNode[] nodeData, ref internalNode[] leafData, float treeScale)
     {
         internalNode root = nodeData[0];
-        DrawNode(root, Vector3.zero);
+        DrawNode(root, Vector3.zero, root.maxPos - root.minPos);
         DrawTreeRecursive(root, Vector3.zero, 2f * treeScale, ref nodeData, ref leafData);
+    }
+
+
+    public static void VisualizeBVHTree(ref internalNode[] nodeData, ref internalNode[] leafData, float treeScale, internalNode sampleNode)
+    {
+        
+        internalNode root = nodeData[0];
+        DrawNode(root, Vector3.zero, root.maxPos - root.minPos);
+        DrawTreeRecursive(root, Vector3.zero, 2f * treeScale, ref nodeData, ref leafData, sampleNode);
     }
 
     static void DrawNode(internalNode node, Vector3 pos)
     {
         Gizmos.color = Color.white;// / node.visited;
+        Gizmos.DrawSphere(pos, 0.5f);
+    }
+
+    static void DrawNode(internalNode node, Vector3 pos, Vector3 AABBVector)
+    {
+        Gizmos.color = Color.red * AABBVector.magnitude;// new Color(AABBVector.normalized.x, AABBVector.normalized.y, AABBVector.normalized.z) * 2;// / node.visited;
+        if (isLeaf(node))
+            Gizmos.color = Color.green;// / node.visited;
         Gizmos.DrawSphere(pos, 0.5f);
     }
 
@@ -310,7 +381,7 @@ public static class PhysicsDebugger {
         }
     }
 
-    static void CalculateAABB(Vector3 inMinA, Vector3 inMaxA, Vector3 inMinB, Vector3 inMaxB, out Vector3 minPoint, out Vector3 maxPoint)
+    public static void CalculateAABB(Vector3 inMinA, Vector3 inMaxA, Vector3 inMinB, Vector3 inMaxB, out Vector3 minPoint, out Vector3 maxPoint)
     {
         Vector3 posAA = inMinA;
         Vector3 posAB = inMaxA;
@@ -328,7 +399,7 @@ public static class PhysicsDebugger {
         maxPoint = new Vector3(xmax, ymax, zmax);
     }
 
-    static void CalculateAABB(internalNode node, out Vector3 minPoint, out Vector3 maxPoint, ref internalNode[] nodeData, ref internalNode[] leafData)
+    public static void CalculateAABB(internalNode node, out Vector3 minPoint, out Vector3 maxPoint, ref internalNode[] nodeData, ref internalNode[] leafData)
     {
 
         internalNode childA;
