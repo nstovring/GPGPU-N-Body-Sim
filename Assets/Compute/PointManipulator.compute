@@ -1,0 +1,248 @@
+﻿// shadertype=unity
+// Each #kernel tells which function to compile; you can have many kernels
+
+
+//#pragma kernel CSLoad
+
+#include "BVHTraversal.cginc"
+
+float DeltaTime;
+float speed;
+float angularSpeed;
+float gravity;
+float radius;
+float3 gravityVec;
+float3 sphereColliderPos;
+float sphereRadius;
+float viscosity;
+
+float3 ApplyVelocity(float3 direction){
+	float c = 0.1;
+	float3 friction = normalize(direction) *-1 * c;
+	direction += friction * DeltaTime;
+	direction += gravityVec * gravity  * DeltaTime;
+	return direction;
+}
+float3 Normalize(float3 v) {
+	float len = length(v);
+	float3 normal = (len == 0.0) ? float3(0.0, 0.0, 0.0) : v / len;
+	return normal;
+}
+
+float Poly6(particle i, particle j)
+{
+    float h = 0.2;
+    float r = distance(i.position, j.position);
+    float res = (315 / (64 * PI * pow(h, 9))) * pow(pow(h, 2) - pow(r, 2), 3);
+    return res;
+}
+
+float SpikyKernel(particle i, particle j)
+{
+    float h = 0.8;
+    float r = distance(i.position, j.position);
+    return -((45 / (PI * pow(h, 6))) * pow(h - r, 2));
+}
+
+float Laplacian(float r, float h)
+{
+    return -((pow(r, 3) / (2 * pow(h, 3))) + (pow(r, 2) / (pow(h, 2))) + (h / (2 * r))) - 1;
+}
+
+void SPH(particle i, particle j, out float3 ai, out float3 avi)
+{
+    float3 N = Normalize(j.position - i.position);
+    float r = distance(j.position, i.position);
+    float pressureSolve = (((i.pressure + j.pressure) / (2 * i.density * j.density)));
+    ai = N * ((i.pressure + j.pressure) / (4 * i.density)) * SpikyKernel(i, j); // / (2 * i.density * j.density); // * SpikyKernel(i, j) * N;
+    avi = (j.mass / i.mass) * (1 / j.density) * (j.direction - i.direction) * pow(Laplacian(r, 0.1), 2) * N;
+
+    //return ai + avi;
+}
+
+float3 calculateCollisionForce(float3 i, float3 j, float k, float diameter, float3 vi, float3 vj, float damping) {
+	float3 repulsiveForce = float3(0, 0, 0);
+    float3 tangentialForce = float3(0, 0, 0);
+    float3 dampingForce = float3(0, 0, 0);
+	float3 rPosition = j - i;
+	float3 rVelocity = vj - vi;
+
+    repulsiveForce = -k * (diameter - distance(i,j)) * (Normalize(rPosition));
+
+    dampingForce = (rVelocity) * damping;
+    tangentialForce =(rVelocity - (dot(rVelocity, Normalize(rPosition))) * Normalize(rPosition));
+    return repulsiveForce + dampingForce + tangentialForce;
+}
+
+#pragma kernel TraversalKernel
+[numthreads(MainKernelThreadX, 1, 1)]
+void TraversalKernel(uint3 id : SV_DispatchThreadID, uint3 Gid : SV_GroupID,
+	uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    internalNode leaf = boundingLeafNodes[id.x];
+    particle curParticle = mergeOutputBuffer[leaf.objectId];
+    float3 velocity = curParticle.direction;
+    float3 curPoint = curParticle.position;
+    float pRadius = curParticle.radius;
+    float mass = curParticle.mass;
+    curParticle.density = 0;
+
+    float3 collisionForce = float3(0, 0, 0);
+    float3 steeringForce = float3(0, 0, 0);
+    int collisionList[64];
+    float3 sphColor = float3(0, 0, 0);
+
+    TraverseBVHIterative(leaf, pRadius * 2, collisionList);
+    for (int i = 0; i < 64; i++)
+    {
+        if (collisionList[i] > -1)
+        {
+            particle p = mergeOutputBuffer[collisionList[i]];
+            curParticle.density += mass * Poly6(p, curParticle);
+            float dist = distance(curPoint, p.position);
+            if (dist < pRadius * 2)
+            {
+                float3 c = calculateCollisionForce(curPoint, p.position, 1000, pRadius * 2, velocity, p.direction, viscosity);
+                collisionForce += c;
+            }
+        }
+        else
+        {
+            break;
+        }
+    }
+    float K = 1;
+    float p0 = 1;
+    curParticle.density = curParticle.density/100;
+    curParticle.pressure = (K * (curParticle.density - p0));
+    //collisionForce *= curParticle.pressure;
+
+    
+    float dist = distance(curPoint * 20,sphereColliderPos);
+    if (dist < (radius * 20 * 2 + sphereRadius))
+    {
+        float3 c = -Normalize(sphereColliderPos - (curPoint * 20)) * (100 / dist);
+        collisionForce += c;
+    }
+
+    float3 dampingForce = -velocity * 0.1;
+    mass = curParticle.mass;
+
+    float3 force = collisionForce + gravityVec * gravity * mass + dampingForce;
+    float3 acceleration = force / mass;
+    velocity = velocity + acceleration * DeltaTime;
+
+    curParticle.direction = velocity;
+
+    mergeOutputBuffer[leaf.objectId] = curParticle;
+}
+
+
+#pragma kernel CSMain
+[numthreads(MainKernelThreadX, 1, 1)]
+void CSMain (uint3 id : SV_DispatchThreadID, uint3 Gid  : SV_GroupID,
+	uint3 GTid : SV_GroupThreadID,
+	uint  GI : SV_GroupIndex)
+{
+    internalNode leaf = boundingLeafNodes[id.x]; 
+    particle curParticle = mergeOutputBuffer[leaf.objectId];
+    float3 velocity = curParticle.direction;
+	float3 curPoint = curParticle.position;
+    float pRadius = curParticle.radius;
+    float3 tempCurPoint = curPoint + velocity * DeltaTime;
+    float scale = 1;
+
+    pRadius = radius;// * (2 - curPoint.y);
+
+    if (tempCurPoint.x > scale  - pRadius)
+    {
+        curPoint.x = scale  - pRadius;
+        velocity.x *= -scale;
+    }
+    else if (tempCurPoint.x < 0 + pRadius)
+    {
+        curPoint.x = 0 + pRadius;
+        velocity.x *= -1;
+    }
+	
+    if (tempCurPoint.y > scale - pRadius)
+    {
+        curPoint.y = scale - pRadius;
+        velocity.y *= -1;
+    }
+    else if (tempCurPoint.y < 0 + pRadius)
+    {
+        curPoint.y = 0 + pRadius;
+	velocity.y *=-0.9;
+	}
+	
+    if (tempCurPoint.z > scale- pRadius)
+    {
+        curPoint.z = scale  - pRadius;
+        velocity.z *= -1;
+    }
+    else if (tempCurPoint.z < 0 + pRadius)
+    {
+        curPoint.z = 0 + pRadius;
+        velocity.z *= -1;
+    }
+
+	curPoint = curPoint + velocity * DeltaTime * speed;
+
+    
+	
+    curParticle.direction = velocity;
+    curParticle.position = curPoint;
+    curParticle.mortonId = morton3D(curPoint.x, curPoint.y, curPoint.z);
+    curParticle.radius = pRadius;
+    inputPoints[id.x] = curParticle;
+}
+
+
+#pragma kernel WriteNodeData
+[numthreads(ThreadX, 1, 1)]
+void WriteNodeData(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
+	uint  GI : SV_GroupIndex)
+{
+    //inputPoints[id.x] = mergeOutputBuffer[id.x];
+    internalNode leaf = boundingLeafNodes[id.x];
+    float pRadius = mergeOutputBuffer[id.x].radius;
+	leaf.parentId = -1;
+	leaf.objectId = id.x;
+	leaf.nodeId = id.x;
+	leaf.mortonId = mergeOutputBuffer[id.x].mortonId;
+    leaf.minPos = mergeOutputBuffer[id.x].position - float3(pRadius, pRadius, pRadius);
+    leaf.maxPos = mergeOutputBuffer[id.x].position + float3(pRadius, pRadius, pRadius);
+    leaf.sRadius = pRadius;
+	
+    leafNodes[id.x] = leaf;
+    boundingLeafNodes[id.x] = leaf;
+
+    uint count, stride;
+    boundingInternalNodes.GetDimensions(count, stride);
+    if (id.x >= count)
+        return;
+
+    internalNode intNode = internalNodes[id.x];
+    intNode.parentId = -1;
+    intNode.objectId = -1;
+    intNode.visited = 0;
+    intNode.nodeId = id.x;
+    internalNodes[id.x] = intNode;
+    boundingInternalNodes[id.x] = intNode;
+
+}
+
+#pragma kernel CSAssignMortonIDs
+[numthreads(ThreadX,1,1)]
+void CSAssignMortonIDs (uint3 id : SV_DispatchThreadID)
+{
+	float3 particlePos =  inputPoints[id.x].position; 
+	uint mortonid = morton3D(particlePos.x,particlePos.y,particlePos.z);
+	inputPoints[id.x].mortonId = mortonid;
+	GroupMemoryBarrierWithGroupSync();
+}
+
+
+

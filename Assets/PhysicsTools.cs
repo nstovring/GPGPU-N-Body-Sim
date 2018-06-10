@@ -9,9 +9,11 @@ namespace PhysicsTools
         public Vector3 position;
         public Vector3 direction;
         public Vector3 color;
-        float radius;
+        public float radius;
+        public float density;
+        public float pressure;
+        public float mass;
         public uint morton;
-        public int collision;
     }
     public struct internalNode
     {
@@ -41,7 +43,7 @@ namespace PhysicsTools
             return points;
         }
 
-        public static particle[] GetParticlePoints(int count, float size)
+        public static particle[] GetParticlePoints(int count, float size, float radius, float mass)
         {
             particle[] points = new particle[count];
             Random.InitState(1422347532);
@@ -51,6 +53,11 @@ namespace PhysicsTools
                 points[i].position = new Vector3(Random.Range(0, size), Random.Range(0, size), Random.Range(0, size));
                 points[i].direction = Vector3.zero;// new Vector3(Random.Range(-size, size), Random.Range(-size, size), Random.Range(-size, size));
                 points[i].color = new Vector3(Random.Range(0, size), Random.Range(0, size), Random.Range(0, size));
+                points[i].radius = radius;
+                points[i].mass = mass;
+                points[i].density = 0.0001f;
+                points[i].pressure = 1f;
+
             }
             return points;
         }

@@ -1,0 +1,117 @@
+﻿#include "BVHTools.cginc"
+#pragma kernel CSGenerateBoundingBoxes
+#pragma kernel CSUnion
+
+void CalculateAABB(float3 inMinA, float3 inMaxA, float3 inMinB, float3 inMaxB, out float3 minPoint, out float3 maxPoint)
+{
+    float3 posAA = inMinA;
+    float3 posAB = inMaxA;
+    float3 posBA = inMinB;
+    float3 posBB = inMaxB;
+    float xmin = min(min(posBA.x, posBB.x), min(posAA.x, posAB.x));
+    float ymin = min(min(posBA.y, posBB.y), min(posAA.y, posAB.y));
+    float zmin = min(min(posBA.z, posBB.z), min(posAA.z, posAB.z));
+
+    float xmax = max(max(posBA.x, posBB.x), max(posAA.x, posAB.x));
+    float ymax = max(max(posBA.y, posBB.y), max(posAA.y, posAB.y));
+    float zmax = max(max(posBA.z, posBB.z), max(posAA.z, posAB.z));
+
+    minPoint = float3(xmin, ymin, zmin);
+    maxPoint = float3(xmax, ymax, zmax);
+}
+
+void CalculateAABB(internalNode node, out float3 minPoint, out float3 maxPoint)
+{
+
+    internalNode childA;
+    internalNode childB;
+    GetChildren(node, childA, childB);
+    float3 posAA = childA.minPos;
+    float3 posBA = childB.minPos;
+
+
+    float3 posAB = childA.maxPos;
+    float3 posBB = childB.maxPos;
+
+
+    float xmin = min(posAA.x, posBA.x);
+    float ymin = min(posAA.y, posBA.y);
+    float zmin = min(posAA.z, posBA.z);
+
+    float xmax = max(posAB.x, posBB.x);
+    float ymax = max(posAB.y, posBB.y);
+    float zmax = max(posAB.z, posBB.z);
+
+    minPoint = float3(xmin, ymin, zmin);
+    maxPoint = float3(xmax, ymax, zmax);
+}
+
+[numthreads(ThreadX, 1, 1)]
+void CSGenerateBoundingBoxes(uint3 id : SV_DISPATCHTHREADID, uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    int parentId = parentIds[id.x];
+    int traversalCount = 0;
+    uint count;
+    uint stride;
+    boundingLeafNodes.GetDimensions(count, stride);
+    internalNode parent;
+    int loopCount = 0;
+    bool solved;
+    while (parentId != -1 && loopCount < log2(count))
+    {
+        float3 minPoint;
+        float3 maxPoint;
+        CalculateAABB(boundingInternalNodes[parentId], minPoint, maxPoint);
+        boundingInternalNodes[parentId].minPos = minPoint;
+        boundingInternalNodes[parentId].maxPos = maxPoint;
+        parentId = boundingInternalNodes[parentId].parentId;
+
+        loopCount++;
+    }
+}
+
+[numthreads(ThreadX, 1, 1)]
+void CSUnion(uint3 id : SV_DISPATCHTHREADID, uint3 GTid : SV_GroupThreadID,
+	uint GI : SV_GroupIndex)
+{
+    uint count;
+    uint stride;
+    boundingLeafNodes.GetDimensions(count, stride);
+    //if(id.x == count)
+    //    return;
+    int parentId = parentIds[id.x];
+
+    internalNode parent = boundingInternalNodes[parentId];
+
+    float3 Min;
+    float3 Max;
+    CalculateAABB(parent, Min, Max);
+    if (length(parent.minPos) > 0)
+        CalculateAABB(parent.minPos, parent.maxPos, Min, Max, Min, Max);
+
+    //boundingInternalNodes[id.x] = parent;
+    boundingInternalNodes[id.x].minPos = Min;
+    boundingInternalNodes[id.x].maxPos = Max;
+    parentIds[id.x] = boundingInternalNodes[id.x].parentId;
+}
+
+
+void GetAABB(int parentId, internalNode parent)
+{
+    InterlockedAdd(boundingInternalNodes[parentId].visited, 1);
+    if (boundingInternalNodes[parentId].visited < 2)
+    {
+        return;
+    }
+
+    parent = boundingInternalNodes[parentId];
+    
+    float3 Min;
+    float3 Max;
+    CalculateAABB(parent, Min, Max);
+    
+    boundingInternalNodes[parentId] = parent;
+    boundingInternalNodes[parentId].minPos = Min;
+    boundingInternalNodes[parentId].maxPos = Max;
+}

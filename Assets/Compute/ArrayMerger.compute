@@ -1,0 +1,98 @@
+﻿#include "BVHTools.cginc"
+#pragma kernel Merge
+
+
+groupshared uint searchIDs[SortMergeTreadX];
+groupshared uint GIRanks[SortMergeTreadX];
+int BinarySearch(uint idx, uint mortonCode, uint GI, int offset, uint count)
+{
+    uint iddx = idx;
+    float arrayRank = (iddx / count) * 10;
+    int arrayNum = (arrayRank / (count / SortMergeTreadX));
+    int rank = GIRanks[GI];
+
+    int center = SortMergeTreadX / 2;
+    int maxLoop = 0;
+    int index = center - 1;
+
+    searchIDs[GI] = inputPoints[(iddx + (SortMergeTreadX * offset)) % count].mortonId;
+    GroupMemoryBarrierWithGroupSync();
+
+    float stepScale = 0.25;
+    int direction = 0;
+
+    maxLoop = 0;
+    bool solved = false;
+    do
+    {
+        if (!solved)
+        {
+            index += direction;
+
+            uint middle = searchIDs[index];
+            uint pluOne = searchIDs[index + 1];
+
+            if (middle == mortonCode && !solved)
+            {
+                rank = rank + index + 1 + arrayRank;
+                solved = true;
+            }
+
+            if (pluOne == mortonCode && !solved)
+            {
+                rank = rank + index + 2 + arrayRank;
+                solved = true;
+            }
+
+            if (pluOne == 0 && middle < mortonCode && !solved)
+            {
+                rank = rank + index + 1;
+                solved = true;
+            }
+
+            if (middle < mortonCode && pluOne > mortonCode && !solved)
+            {
+                rank = rank + index + 1;
+                solved = true;
+            }
+
+            if ((SortMergeTreadX) * stepScale < 1 && middle < mortonCode && pluOne < mortonCode && !solved)
+            {
+                rank = rank + index + 2;
+                solved = true;
+            }
+
+            if (middle > mortonCode)
+            {
+                direction = (int) (-1 * (SortMergeTreadX) * stepScale);
+                stepScale = stepScale * 0.5;
+            }
+            if (pluOne < mortonCode)
+            {
+                direction = (int) (1 * (SortMergeTreadX) * stepScale);
+                stepScale = stepScale * 0.5;
+            }
+        }
+        maxLoop++;
+    } while (maxLoop < log2(SortMergeTreadX));
+    return rank;
+}
+
+
+[numthreads(SortMergeTreadX, 1, 1)]
+void Merge(uint3 Gid : SV_GroupID, uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
+{
+    particle current = inputPoints[DTid.x];
+    GIRanks[GI] = GI;
+    AllMemoryBarrierWithGroupSync();
+    uint count, stride;
+    inputPoints.GetDimensions(count, stride);
+    int groupAmount = count / SortMergeTreadX;
+    for (int i = 1; i < groupAmount; i++)
+    {
+        GIRanks[GI] = BinarySearch(DTid.x, current.mortonId, GI, i, count);
+        GroupMemoryBarrierWithGroupSync();
+    }
+    mergeOutputBuffer[GIRanks[GI]] = current;
+    AllMemoryBarrier();
+}

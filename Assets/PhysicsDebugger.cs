@@ -56,7 +56,6 @@ public static class PhysicsDebugger {
         Gizmos.color = Color.green;
         Gizmos.DrawWireCube(((leafData[leaf].minPos + leafData[leaf].maxPos) / 2) * GizmoPosScale, AABBRadius * GizmoScale);
         Gizmos.color = Color.white;
-        int collisionCount = 0;
         string output = "";
         for (int i = 0; i < collisions.Length; i++)
         {
@@ -107,11 +106,7 @@ public static class PhysicsDebugger {
         bool y = minA.y <= maxB.y && minB.y <= maxA.y;
         bool z = minA.z <= maxB.z && minB.z <= maxA.z;
 
-        return (x && y && z);// || (!x && !y && !z);
-
-        return (minA.x <= maxB.x && maxA.x >= minB.x) &&
-            (minA.y <= maxB.y && maxA.y >= minB.y) &&
-            (minA.z <= maxB.z && maxA.z >= minB.z);
+        return (x && y && z);
     }
 
     public static bool isLeaf(internalNode node)
@@ -137,8 +132,6 @@ public static class PhysicsDebugger {
         int maxLoop = 0;
         Gizmos.color = Color.green;
         Vector3 AABBRadius = new Vector3(radius, radius, radius) * 1;
-        Vector3 scale = AABBRadius;
-
         do
         {
             internalNode childA;
@@ -265,7 +258,6 @@ public static class PhysicsDebugger {
         internalNode ChildB;
 
         GetNodeChildren(root, out ChildA, out ChildB, ref leafData, ref nodeData);
-        Vector3 AABBRadius = new Vector3(sampleNode.sRadius, sampleNode.sRadius, sampleNode.sRadius);
         if (AABBOverlap(sampleNode.minPos, sampleNode.maxPos, root.minPos, root.maxPos))
             Gizmos.color = Color.blue;
         else
